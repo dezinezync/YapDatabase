@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Scheme
-   LastUpgradeVersion = "0630"
+   LastUpgradeVersion = "0640"
    version = "1.3">
    <BuildAction
       parallelizeBuildables = "YES"
@@ -14,9 +14,9 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "452D9BB51B10668800A93068"
-               BuildableName = "YapDatabase.framework"
-               BlueprintName = "YapDatabase"
+               BlueprintIdentifier = "F0547E491B7CFA7E00AF4F43"
+               BuildableName = "YapDatabase copy.framework"
+               BlueprintName = "YapDatabaseCopy"
                ReferencedContainer = "container:YapDatabase.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -29,15 +29,6 @@
       buildConfiguration = "Debug">
       <Testables>
       </Testables>
-      <MacroExpansion>
-         <BuildableReference
-            BuildableIdentifier = "primary"
-            BlueprintIdentifier = "452D9BB51B10668800A93068"
-            BuildableName = "YapDatabase.framework"
-            BlueprintName = "YapDatabase"
-            ReferencedContainer = "container:YapDatabase.xcodeproj">
-         </BuildableReference>
-      </MacroExpansion>
    </TestAction>
    <LaunchAction
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
@@ -51,9 +42,9 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "452D9BB51B10668800A93068"
-            BuildableName = "YapDatabase.framework"
-            BlueprintName = "YapDatabase"
+            BlueprintIdentifier = "F0547E491B7CFA7E00AF4F43"
+            BuildableName = "YapDatabase copy.framework"
+            BlueprintName = "YapDatabaseCopy"
             ReferencedContainer = "container:YapDatabase.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
@@ -69,9 +60,9 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "452D9BB51B10668800A93068"
-            BuildableName = "YapDatabase.framework"
-            BlueprintName = "YapDatabase"
+            BlueprintIdentifier = "F0547E491B7CFA7E00AF4F43"
+            BuildableName = "YapDatabase copy.framework"
+            BlueprintName = "YapDatabaseCopy"
             ReferencedContainer = "container:YapDatabase.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
@@ -81,6 +72,7 @@
    </AnalyzeAction>
    <ArchiveAction
       buildConfiguration = "Release"
+      customArchiveName = "YapDatabase"
       revealArchiveInOrganizer = "YES">
    </ArchiveAction>
 </Scheme>
