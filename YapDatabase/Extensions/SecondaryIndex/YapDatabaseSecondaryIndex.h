@@ -1,11 +1,14 @@
 #import <Foundation/Foundation.h>
 
 #import "YapDatabaseExtension.h"
+
 #import "YapDatabaseSecondaryIndexSetup.h"
 #import "YapDatabaseSecondaryIndexHandler.h"
 #import "YapDatabaseSecondaryIndexOptions.h"
 #import "YapDatabaseSecondaryIndexConnection.h"
 #import "YapDatabaseSecondaryIndexTransaction.h"
+
+NS_ASSUME_NONNULL_BEGIN
 
 /**
  * Welcome to YapDatabase!
@@ -25,7 +28,7 @@
  *
  * For more information, see the wiki article about secondary indexes:
  * https://github.com/yapstudios/YapDatabase/wiki/Secondary-Indexes
-**/
+ */
 @interface YapDatabaseSecondaryIndex : YapDatabaseExtension
 
 /**
@@ -47,7 +50,7 @@
  * @see YapDatabaseSecondaryIndexHandler
  * 
  * @see YapDatabase registerExtension:withName:
-**/
+ */
 - (id)initWithSetup:(YapDatabaseSecondaryIndexSetup *)setup
             handler:(YapDatabaseSecondaryIndexHandler *)handler;
 
@@ -56,17 +59,14 @@
  * After creation, you'll need to register the extension with the database system.
  *
  * @param setup
- * 
  *   A YapDatabaseSecondaryIndexSetup instance allows you to specify the column names and type.
  *   The column names can be whatever you want, with a few exceptions for reserved names such as "rowid".
  *   The types can reflect numbers or text.
  * 
  * @param handler
- * 
  *   The block (and blockType) that handles extracting secondary index information from a row in the database.
  * 
- * @param version
- * 
+ * @param versionTag
  *   If, after creating the secondary index(es), you need to change the setup or block,
  *   then simply increment the version parameter. If you pass a version that is different from the last
  *   initialization of the extension, then it will automatically re-create itself.
@@ -75,10 +75,10 @@
  * @see YapDatabaseSecondaryIndexHandler
  *
  * @see YapDatabase registerExtension:withName:
-**/
+ */
 - (id)initWithSetup:(YapDatabaseSecondaryIndexSetup *)setup
             handler:(YapDatabaseSecondaryIndexHandler *)handler
-         versionTag:(NSString *)versionTag;
+         versionTag:(nullable NSString *)versionTag;
 
 /**
  * Creates a new secondary index extension.
@@ -94,7 +94,7 @@
  * 
  *   The block (and blockType) that handles extracting secondary index information from a row in the database.
  * 
- * @param version
+ * @param versionTag
  * 
  *   If, after creating the secondary index(es), you need to change the setup or block,
  *   then simply increment the version parameter. If you pass a version that is different from the last
@@ -109,11 +109,11 @@
  * @see YapDatabaseSecondaryIndexHandler
  *
  * @see YapDatabase registerExtension:withName:
-**/
+ */
 - (id)initWithSetup:(YapDatabaseSecondaryIndexSetup *)setup
             handler:(YapDatabaseSecondaryIndexHandler *)handler
-         versionTag:(NSString *)versionTag
-            options:(YapDatabaseSecondaryIndexOptions *)options;
+         versionTag:(nullable NSString *)versionTag
+            options:(nullable YapDatabaseSecondaryIndexOptions *)options;
 
 
 /* Inherited from YapDatabaseExtension
@@ -128,7 +128,9 @@
  * If you need to change the columnNames and/or block,
  * then simply pass a different versionTag during the init method,
  * and the extension will automatically update itself.
-**/
+ */
 @property (nonatomic, copy, readonly) NSString *versionTag;
 
 @end
+
+NS_ASSUME_NONNULL_END

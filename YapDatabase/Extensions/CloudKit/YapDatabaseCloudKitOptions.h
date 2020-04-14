@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import "YapWhitelistBlacklist.h"
 
+NS_ASSUME_NONNULL_BEGIN
 
 @interface YapDatabaseCloudKitOptions : NSObject <NSCopying>
 
@@ -23,10 +24,12 @@
  * So the GetRecordBlock would still be invoked as normal.
  *
  * The default value is nil.
-**/
-@property (nonatomic, strong, readwrite) YapWhitelistBlacklist *allowedCollections;
+ */
+@property (nonatomic, strong, readwrite, nullable) YapWhitelistBlacklist *allowedCollections;
 
 
 // Todo: Need ability to set default options for CKModifyRecordsOperation
 
 @end
+
+NS_ASSUME_NONNULL_END

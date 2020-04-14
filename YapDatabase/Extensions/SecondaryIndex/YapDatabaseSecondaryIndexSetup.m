@@ -10,12 +10,25 @@
  * See YapDatabaseLogging.h for more information.
  **/
 #if DEBUG
-  static const int ydbLogLevel = YDB_LOG_LEVEL_WARN;
+  static const int ydbLogLevel = YDBLogLevelWarning;
 #else
-  static const int ydbLogLevel = YDB_LOG_LEVEL_WARN;
+  static const int ydbLogLevel = YDBLogLevelWarning;
 #endif
 #pragma unused(ydbLogLevel)
 
+
+NSString* NSStringFromYapDatabaseSecondaryIndexType(YapDatabaseSecondaryIndexType type)
+{
+	switch (type)
+	{
+		case YapDatabaseSecondaryIndexTypeInteger : return @"INTEGER";
+		case YapDatabaseSecondaryIndexTypeReal    : return @"REAL";
+		case YapDatabaseSecondaryIndexTypeNumeric : return @"NUMERIC";
+		case YapDatabaseSecondaryIndexTypeText    : return @"TEXT";
+		case YapDatabaseSecondaryIndexTypeBlob    : return @"BLOB";
+		default                                   : return @"UNKNOWN";
+	}
+}
 
 @interface YapDatabaseSecondaryIndexColumn ()
 - (id)initWithName:(NSString *)name type:(YapDatabaseSecondaryIndexType)type;
@@ -88,7 +101,7 @@
 	{
 		NSAssert(NO, @"Invalid columnName: nil");
 		
-		YDBLogError(@"%@: Invalid columnName: nil", THIS_METHOD);
+		YDBLogError(@"Invalid columnName: nil");
 		return;
 	}
 	
@@ -110,11 +123,13 @@
 	
 	if (type != YapDatabaseSecondaryIndexTypeInteger &&
 	    type != YapDatabaseSecondaryIndexTypeReal    &&
-	    type != YapDatabaseSecondaryIndexTypeText)
+	    type != YapDatabaseSecondaryIndexTypeNumeric &&
+	    type != YapDatabaseSecondaryIndexTypeText    &&
+	    type != YapDatabaseSecondaryIndexTypeBlob     )
 	{
 		NSAssert(NO, @"Invalid type");
 		
-		YDBLogError(@"%@: Invalid type", THIS_METHOD);
+		YDBLogError(@"Invalid type");
 		return;
 	}
 	
@@ -196,9 +211,19 @@
 				if ([existingAffinity caseInsensitiveCompare:@"REAL"] != NSOrderedSame)
 					return NO;
 			}
+			else if (setupColumn.type == YapDatabaseSecondaryIndexTypeNumeric)
+			{
+				if ([existingAffinity caseInsensitiveCompare:@"NUMERIC"] != NSOrderedSame)
+					return NO;
+			}
 			else if (setupColumn.type == YapDatabaseSecondaryIndexTypeText)
 			{
 				if ([existingAffinity caseInsensitiveCompare:@"TEXT"] != NSOrderedSame)
+					return NO;
+			}
+			else if (setupColumn.type == YapDatabaseSecondaryIndexTypeBlob)
+			{
+				if ([existingAffinity caseInsensitiveCompare:@"BLOB"] != NSOrderedSame)
 					return NO;
 			}
 		}
@@ -230,15 +255,7 @@
 
 - (NSString *)description
 {
-	NSString *typeStr;
-	if (type == YapDatabaseSecondaryIndexTypeInteger)
-		typeStr = @"Integer";
-	else if (type == YapDatabaseSecondaryIndexTypeReal)
-		typeStr = @"Real";
-	else if (type == YapDatabaseSecondaryIndexTypeText)
-		typeStr = @"Text";
-	else
-		typeStr = @"Unknown";
+	NSString *typeStr = NSStringFromYapDatabaseSecondaryIndexType(type);
 	
 	return [NSString stringWithFormat:@"<YapDatabaseSecondaryIndexColumn: name(%@), type(%@)>", name, typeStr];
 }

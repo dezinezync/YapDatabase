@@ -1,5 +1,7 @@
 #import <Foundation/Foundation.h>
 
+NS_ASSUME_NONNULL_BEGIN
+
 /**
  * Welcome to YapDatabase!
  *
@@ -14,7 +16,7 @@
  *
  * For tons of information about this extension, see the wiki article:
  * https://github.com/yapstudios/YapDatabase/wiki/Relationships
-**/
+ */
 
 typedef NS_OPTIONS(uint16_t, YDB_NodeDeleteRules) {
     // notify only
@@ -30,7 +32,7 @@ typedef NS_OPTIONS(uint16_t, YDB_NodeDeleteRules) {
     YDB_DeleteDestinationIfAllSourcesDeleted = 1 << 5,
 };
 
-@interface YapDatabaseRelationshipEdge : NSObject <NSCoding, NSCopying>
+@interface YapDatabaseRelationshipEdge : NSObject <NSCopying>
 
 /**
  * Returns an edge with the given name, destination & nodeDeleteRules.
@@ -42,16 +44,16 @@ typedef NS_OPTIONS(uint16_t, YDB_NodeDeleteRules) {
  * 
  * This method is not suitable for use with manual edge management.
  * When manually adding an edge, you must fully specify the source node.
-**/
+ */
 + (instancetype)edgeWithName:(NSString *)name
               destinationKey:(NSString *)destinationKey
-                  collection:(NSString *)destinationCollection
+                  collection:(nullable NSString *)destinationCollection
              nodeDeleteRules:(YDB_NodeDeleteRules)rules;
 
 /**
- * Returns an edge with the given name, destinationFilePath & nodeDeleteRules.
+ * Returns an edge with the given name, destinationFileURL & nodeDeleteRules.
  * 
- * When using a destinationFilePath, only a subset of the nodeDeleteRules apply.
+ * When using a destinationFileURL, only a subset of the nodeDeleteRules apply.
  * Specifically only the following work:
  * - YDB_DeleteDestinationIfSourceDeleted
  * - YDB_DeleteDestinationIfAllSourcesDeleted
@@ -63,9 +65,9 @@ typedef NS_OPTIONS(uint16_t, YDB_NodeDeleteRules) {
  * 
  * This method is not suitable for use with manual edge management.
  * When directly adding an edge, you must fully specify the source node.
-**/
+ */
 + (instancetype)edgeWithName:(NSString *)name
-         destinationFilePath:(NSString *)destinationFilePath
+          destinationFileURL:(NSURL *)destinationFileURL
              nodeDeleteRules:(YDB_NodeDeleteRules)rules;
 
 /**
@@ -76,18 +78,18 @@ typedef NS_OPTIONS(uint16_t, YDB_NodeDeleteRules) {
  * If you're using the YapDatabaseRelationshipNode protocol, then you can use the shorter version of this method
  * which doesn't specify the source node. This is because the source node is implied with the
  * YapDatabaseRelationshipNode protocol, and thus doesn't need to be explicitly specified in the edge.
-**/
+ */
 + (instancetype)edgeWithName:(NSString *)name
                    sourceKey:(NSString *)sourceKey
-                  collection:(NSString *)sourceCollection
+                  collection:(nullable NSString *)sourceCollection
               destinationKey:(NSString *)destinationKey
-                  collection:(NSString *)destinationCollection
+                  collection:(nullable NSString *)destinationCollection
              nodeDeleteRules:(YDB_NodeDeleteRules)rules;
 
 /**
  * Returns a fully specified edge.
  * 
- * When using a destinationFilePath, only a subset of the nodeDeleteRules apply.
+ * When using a destinationFileURL, only a subset of the nodeDeleteRules apply.
  * Specifically only the following work:
  * - YDB_DeleteDestinationIfSourceDeleted
  * - YDB_DeleteDestinationIfAllSourcesDeleted
@@ -97,45 +99,45 @@ typedef NS_OPTIONS(uint16_t, YDB_NodeDeleteRules) {
  * If you're using the YapDatabaseRelationshipNode protocol, then you can use the shorter version of this method
  * which doesn't specify the source node. This is because the source node is implied with the
  * YapDatabaseRelationshipNode protocol, and thus doesn't need to be explicitly specified in the edge.
-**/
+ */
 + (instancetype)edgeWithName:(NSString *)name
                    sourceKey:(NSString *)sourceKey
-                  collection:(NSString *)sourceCollection
-         destinationFilePath:(NSString *)destinationFilePath
+                  collection:(nullable NSString *)sourceCollection
+          destinationFileURL:(NSURL *)destinationFileURL
              nodeDeleteRules:(YDB_NodeDeleteRules)rules;
 
 #pragma mark Init
 
 /**
  * For documentation @see edgeWithName:destinationKey:collection:nodeDeleteRules:
-**/
+ */
 - (id)initWithName:(NSString *)name
     destinationKey:(NSString *)key
-        collection:(NSString *)collection
+        collection:(nullable NSString *)collection
    nodeDeleteRules:(YDB_NodeDeleteRules)rules;
 
 /**
- * For documentation @see edgeWithName:destinationFilePath:nodeDeleteRules:
-**/
-- (id)initWithName:(NSString *)name destinationFilePath:(NSString *)destinationFilePath
-                                        nodeDeleteRules:(YDB_NodeDeleteRules)rules;
+ * For documentation @see edgeWithName:destinationFileURL:nodeDeleteRules:
+ */
+- (id)initWithName:(NSString *)name destinationFileURL:(NSURL *)destinationFileURL
+                                       nodeDeleteRules:(YDB_NodeDeleteRules)rules;
 
 /**
  * For documentation @see edgeWithName:sourceKey:collection:destinationKey:collection:nodeDeleteRules:
-**/
+ */
 - (id)initWithName:(NSString *)name
          sourceKey:(NSString *)sourceKey
-        collection:(NSString *)sourceCollection
+        collection:(nullable NSString *)sourceCollection
     destinationKey:(NSString *)destinationKey
-        collection:(NSString *)destinationCollection
+        collection:(nullable NSString *)destinationCollection
    nodeDeleteRules:(YDB_NodeDeleteRules)rules;
 
 /**
- * For documentation @see edgeWithName:sourceKey:collection:destinationFilePath:nodeDeleteRules:
-**/
+ * For documentation @see edgeWithName:sourceKey:collection:destinationFileURL:nodeDeleteRules:
+ */
 - (id)initWithName:(NSString *)name sourceKey:(NSString *)sourceKey
-                                   collection:(NSString *)sourceCollection
-                          destinationFilePath:(NSString *)destinationFilePath
+                                   collection:(nullable NSString *)sourceCollection
+                           destinationFileURL:(NSURL *)destinationFileURL
                               nodeDeleteRules:(YDB_NodeDeleteRules)rules;
 
 #pragma mark Properties
@@ -148,14 +150,16 @@ typedef NS_OPTIONS(uint16_t, YDB_NodeDeleteRules) {
 @property (nonatomic, copy, readonly) NSString *destinationKey;
 @property (nonatomic, copy, readonly) NSString *destinationCollection;
 
-@property (nonatomic, copy, readonly) NSString *destinationFilePath;
+@property (nonatomic, copy, readonly) NSURL *destinationFileURL;
 
 @property (nonatomic, assign, readonly) YDB_NodeDeleteRules nodeDeleteRules;
 
 /**
  * NO if the edge was created via the YapDatabaseRelationshipNode protocol.
  * YES if the edge was created via "manual edge management" methods.
-**/
+ */
 @property (nonatomic, assign, readonly) BOOL isManualEdge;
 
 @end
+
+NS_ASSUME_NONNULL_END

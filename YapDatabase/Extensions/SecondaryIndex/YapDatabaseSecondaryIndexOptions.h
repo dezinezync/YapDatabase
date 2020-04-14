@@ -1,6 +1,8 @@
 #import <Foundation/Foundation.h>
 #import "YapWhitelistBlacklist.h"
 
+NS_ASSUME_NONNULL_BEGIN
+
 /**
  * Welcome to YapDatabase!
  * https://github.com/yapstudios/YapDatabase
@@ -12,7 +14,7 @@
  * 
  * For more information, see the wiki article about secondary indexes:
  * https://github.com/yapstudios/YapDatabase/wiki/Secondary-Indexes
-**/
+ */
 @interface YapDatabaseSecondaryIndexOptions : NSObject <NSCopying>
 
 /**
@@ -35,7 +37,9 @@
  * So the secondaryIndexBlock would still be invoked as normal.
  *
  * The default value is nil.
-**/
-@property (nonatomic, strong, readwrite) YapWhitelistBlacklist *allowedCollections;
+ */
+@property (nonatomic, strong, readwrite, nullable) YapWhitelistBlacklist *allowedCollections;
 
 @end
+
+NS_ASSUME_NONNULL_END

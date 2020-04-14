@@ -16,9 +16,9 @@
  * See YapDatabaseLogging.h for more information.
 **/
 #if DEBUG
-  static const int ydbLogLevel = YDB_LOG_LEVEL_WARN;
+  static const int ydbLogLevel = YDBLogLevelWarning;
 #else
-  static const int ydbLogLevel = YDB_LOG_LEVEL_WARN;
+  static const int ydbLogLevel = YDBLogLevelWarning;
 #endif
 #pragma unused(ydbLogLevel)
 
@@ -29,12 +29,12 @@ static NSString *const ext_key_version_deprecated = @"version";
 
 @implementation YapDatabaseSecondaryIndexTransaction
 
-- (id)initWithSecondaryIndexConnection:(YapDatabaseSecondaryIndexConnection *)inSecondaryIndexConnection
-                   databaseTransaction:(YapDatabaseReadTransaction *)inDatabaseTransaction
+- (id)initWithParentConnection:(YapDatabaseSecondaryIndexConnection *)inParentConnection
+           databaseTransaction:(YapDatabaseReadTransaction *)inDatabaseTransaction
 {
 	if ((self = [super init]))
 	{
-		secondaryIndexConnection = inSecondaryIndexConnection;
+		parentConnection = inParentConnection;
 		databaseTransaction = inDatabaseTransaction;
 	}
 	return self;
@@ -70,7 +70,7 @@ static NSString *const ext_key_version_deprecated = @"version";
 		
 		[self setIntValue:classVersion forExtensionKey:ext_key_classVersion persistent:YES];
 		
-		NSString *versionTag = secondaryIndexConnection->secondaryIndex->versionTag;
+		NSString *versionTag = parentConnection->parent->versionTag;
 		[self setStringValue:versionTag forExtensionKey:ext_key_versionTag persistent:YES];
 	}
 	else
@@ -78,7 +78,7 @@ static NSString *const ext_key_version_deprecated = @"version";
 		// Check user-supplied versionTag.
 		// We may need to re-populate the database if it changed.
 		
-		NSString *versionTag = secondaryIndexConnection->secondaryIndex->versionTag;
+		NSString *versionTag = parentConnection->parent->versionTag;
 		
 		NSString *oldVersionTag = [self stringValueForExtensionKey:ext_key_versionTag persistent:YES];
 		
@@ -144,15 +144,14 @@ static NSString *const ext_key_version_deprecated = @"version";
 			
 			NSDictionary *columns = [YapDatabase columnNamesAndAffinityForTable:[self tableName] using:db];
 			
-			YapDatabaseSecondaryIndexSetup *setup = secondaryIndexConnection->secondaryIndex->setup;
+			YapDatabaseSecondaryIndexSetup *setup = parentConnection->parent->setup;
 			
 			if (![setup matchesExistingColumnNamesAndAffinity:columns])
 			{
-				YDBLogError(@"Error creating secondary index extension (%@):"
+				YDBLogError(@"Error creating secondary index extension:"
 				            @" The given setup doesn't match the previously registered setup."
 				            @" If you change the setup, or you change the block in any meaningful way,"
-				            @" then you MUST change the versionTag as well.",
-				            THIS_METHOD);
+				            @" then you MUST change the versionTag as well.");
 				return NO;
 			}
 		}
@@ -193,8 +192,8 @@ static NSString *const ext_key_version_deprecated = @"version";
 	int status = sqlite3_exec(db, [dropTable UTF8String], NULL, NULL, NULL);
 	if (status != SQLITE_OK)
 	{
-		YDBLogError(@"%@ - Failed dropping secondary index table (%@): %d %s",
-		            THIS_METHOD, dropTable, status, sqlite3_errmsg(db));
+		YDBLogError(@"Failed dropping secondary index table (%@): %d %s",
+		            dropTable, status, sqlite3_errmsg(db));
 		return NO;
 	}
 	
@@ -211,7 +210,7 @@ static NSString *const ext_key_version_deprecated = @"version";
 	sqlite3 *db = databaseTransaction->connection->db;
 	
 	NSString *tableName = [self tableName];
-	YapDatabaseSecondaryIndexSetup *setup = secondaryIndexConnection->secondaryIndex->setup;
+	YapDatabaseSecondaryIndexSetup *setup = parentConnection->parent->setup;
 	
 	YDBLogVerbose(@"Creating secondary index table for registeredName(%@): %@", [self registeredName], tableName);
 	
@@ -230,9 +229,17 @@ static NSString *const ext_key_version_deprecated = @"version";
 		{
 			[createTable appendFormat:@", \"%@\" REAL", column.name];
 		}
+		else if (column.type == YapDatabaseSecondaryIndexTypeNumeric)
+		{
+			[createTable appendFormat:@", \"%@\" NUMERIC", column.name];
+		}
 		else if (column.type == YapDatabaseSecondaryIndexTypeText)
 		{
 			[createTable appendFormat:@", \"%@\" TEXT", column.name];
+		}
+		else if (column.type == YapDatabaseSecondaryIndexTypeBlob)
+		{
+			[createTable appendFormat:@", \"%@\" BLOB", column.name];
 		}
 	}
 	
@@ -241,8 +248,7 @@ static NSString *const ext_key_version_deprecated = @"version";
 	int status = sqlite3_exec(db, [createTable UTF8String], NULL, NULL, NULL);
 	if (status != SQLITE_OK)
 	{
-		YDBLogError(@"%@ - Failed creating secondary index table (%@): %d %s",
-		            THIS_METHOD, tableName, status, sqlite3_errmsg(db));
+		YDBLogError(@"Failed creating secondary index table (%@): %d %s", tableName, status, sqlite3_errmsg(db));
 		return NO;
 	}
 	
@@ -271,30 +277,35 @@ static NSString *const ext_key_version_deprecated = @"version";
 **/
 - (BOOL)populate
 {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wimplicit-retain-self"
+	
 	// Remove everything from the database
 	
 	[self removeAllRowids];
 	
 	// Enumerate the existing rows in the database and populate the indexes
 	
-	__unsafe_unretained YapDatabaseSecondaryIndex *secondaryIndex = secondaryIndexConnection->secondaryIndex;
-	
+	__unsafe_unretained YapDatabaseSecondaryIndex *secondaryIndex = parentConnection->parent;
 	__unsafe_unretained YapWhitelistBlacklist *allowedCollections = secondaryIndex->options.allowedCollections;
 	
-	if (secondaryIndex->blockType == YapDatabaseSecondaryIndexBlockTypeWithKey)
+	YapDatabaseSecondaryIndexHandler *handler = secondaryIndex->handler;
+	YapDatabaseBlockType blockType = handler->blockType;
+	
+	if (blockType == YapDatabaseBlockTypeWithKey)
 	{
 		__unsafe_unretained YapDatabaseSecondaryIndexWithKeyBlock secondaryIndexBlock =
-		    (YapDatabaseSecondaryIndexWithKeyBlock)secondaryIndex->block;
+		    (YapDatabaseSecondaryIndexWithKeyBlock)handler->block;
 		
 		void (^enumBlock)(int64_t rowid, NSString *collection, NSString *key, BOOL *stop);
 		enumBlock = ^(int64_t rowid, NSString *collection, NSString *key, BOOL __unused *stop) {
 			
-			secondaryIndexBlock(secondaryIndexConnection->blockDict, collection, key);
+			secondaryIndexBlock(databaseTransaction, parentConnection->blockDict, collection, key);
 			
-			if ([secondaryIndexConnection->blockDict count] > 0)
+			if ([parentConnection->blockDict count] > 0)
 			{
 				[self addRowid:rowid isNew:YES];
-				[secondaryIndexConnection->blockDict removeAllObjects];
+				[parentConnection->blockDict removeAllObjects];
 			}
 		};
 		
@@ -313,20 +324,20 @@ static NSString *const ext_key_version_deprecated = @"version";
 			[databaseTransaction _enumerateKeysInAllCollectionsUsingBlock:enumBlock];
 		}
 	}
-	else if (secondaryIndex->blockType == YapDatabaseSecondaryIndexBlockTypeWithObject)
+	else if (blockType == YapDatabaseBlockTypeWithObject)
 	{
 		__unsafe_unretained YapDatabaseSecondaryIndexWithObjectBlock secondaryIndexBlock =
-		    (YapDatabaseSecondaryIndexWithObjectBlock)secondaryIndex->block;
+		    (YapDatabaseSecondaryIndexWithObjectBlock)handler->block;
 		
 		void (^enumBlock)(int64_t rowid, NSString *collection, NSString *key, id object, BOOL *stop);
 		enumBlock = ^(int64_t rowid, NSString *collection, NSString *key, id object, BOOL __unused *stop) {
 			
-			secondaryIndexBlock(secondaryIndexConnection->blockDict, collection, key, object);
+			secondaryIndexBlock(databaseTransaction, parentConnection->blockDict, collection, key, object);
 			
-			if ([secondaryIndexConnection->blockDict count] > 0)
+			if ([parentConnection->blockDict count] > 0)
 			{
 				[self addRowid:rowid isNew:YES];
-				[secondaryIndexConnection->blockDict removeAllObjects];
+				[parentConnection->blockDict removeAllObjects];
 			}
 		};
 		
@@ -346,20 +357,20 @@ static NSString *const ext_key_version_deprecated = @"version";
 			[databaseTransaction _enumerateKeysAndObjectsInAllCollectionsUsingBlock:enumBlock];
 		}
 	}
-	else if (secondaryIndex->blockType == YapDatabaseSecondaryIndexBlockTypeWithMetadata)
+	else if (blockType == YapDatabaseBlockTypeWithMetadata)
 	{
 		__unsafe_unretained YapDatabaseSecondaryIndexWithMetadataBlock secondaryIndexBlock =
-		    (YapDatabaseSecondaryIndexWithMetadataBlock)secondaryIndex->block;
+		    (YapDatabaseSecondaryIndexWithMetadataBlock)handler->block;
 		
 		void (^enumBlock)(int64_t rowid, NSString *collection, NSString *key, id metadata, BOOL *stop);
 		enumBlock = ^(int64_t rowid, NSString *collection, NSString *key, id metadata, BOOL __unused *stop) {
 			
-			secondaryIndexBlock(secondaryIndexConnection->blockDict, collection, key, metadata);
+			secondaryIndexBlock(databaseTransaction, parentConnection->blockDict, collection, key, metadata);
 			
-			if ([secondaryIndexConnection->blockDict count] > 0)
+			if ([parentConnection->blockDict count] > 0)
 			{
 				[self addRowid:rowid isNew:YES];
-				[secondaryIndexConnection->blockDict removeAllObjects];
+				[parentConnection->blockDict removeAllObjects];
 			}
 		};
 		
@@ -379,20 +390,20 @@ static NSString *const ext_key_version_deprecated = @"version";
 			[databaseTransaction _enumerateKeysAndMetadataInAllCollectionsUsingBlock:enumBlock];
 		}
 	}
-	else // if (secondaryIndex->blockType == YapDatabaseSecondaryIndexBlockTypeWithRow)
+	else // if (blockType == YapDatabaseBlockTypeWithRow)
 	{
 		__unsafe_unretained YapDatabaseSecondaryIndexWithRowBlock secondaryIndexBlock =
-		    (YapDatabaseSecondaryIndexWithRowBlock)secondaryIndex->block;
+		    (YapDatabaseSecondaryIndexWithRowBlock)handler->block;
 		
 		void (^enumBlock)(int64_t rowid, NSString *collection, NSString *key, id object, id metadata, BOOL *stop);
 		enumBlock = ^(int64_t rowid, NSString *collection, NSString *key, id object, id metadata, BOOL __unused *stop) {
 			
-			secondaryIndexBlock(secondaryIndexConnection->blockDict, collection, key, object, metadata);
+			secondaryIndexBlock(databaseTransaction, parentConnection->blockDict, collection, key, object, metadata);
 			
-			if ([secondaryIndexConnection->blockDict count] > 0)
+			if ([parentConnection->blockDict count] > 0)
 			{
 				[self addRowid:rowid isNew:YES];
-				[secondaryIndexConnection->blockDict removeAllObjects];
+				[parentConnection->blockDict removeAllObjects];
 			}
 		};
 		
@@ -413,6 +424,8 @@ static NSString *const ext_key_version_deprecated = @"version";
 	}
 	
 	return YES;
+	
+#pragma clang diagnostic pop
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -432,17 +445,17 @@ static NSString *const ext_key_version_deprecated = @"version";
 **/
 - (YapDatabaseExtensionConnection *)extensionConnection
 {
-	return secondaryIndexConnection;
+	return parentConnection;
 }
 
 - (NSString *)registeredName
 {
-	return [secondaryIndexConnection->secondaryIndex registeredName];
+	return [parentConnection->parent registeredName];
 }
 
 - (NSString *)tableName
 {
-	return [secondaryIndexConnection->secondaryIndex tableName];
+	return [parentConnection->parent tableName];
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -458,9 +471,9 @@ static NSString *const ext_key_version_deprecated = @"version";
 	
 	sqlite3_stmt *statement = NULL;
 	if (isNew)
-		statement = [secondaryIndexConnection insertStatement];
+		statement = [parentConnection insertStatement];
 	else
-		statement = [secondaryIndexConnection updateStatement];
+		statement = [parentConnection updateStatement];
 	
 	if (statement == NULL)
 		return;
@@ -473,62 +486,79 @@ static NSString *const ext_key_version_deprecated = @"version";
 	sqlite3_bind_int64(statement, bind_idx, rowid);
 	bind_idx++;
 	
-	for (YapDatabaseSecondaryIndexColumn *column in secondaryIndexConnection->secondaryIndex->setup)
+	for (YapDatabaseSecondaryIndexColumn *column in parentConnection->parent->setup)
 	{
-		id columnValue = [secondaryIndexConnection->blockDict objectForKey:column.name];
+		id columnValue = [parentConnection->blockDict objectForKey:column.name];
 		if (columnValue && columnValue != [NSNull null])
 		{
-			if (column.type == YapDatabaseSecondaryIndexTypeInteger)
+			if (column.type == YapDatabaseSecondaryIndexTypeInteger ||
+			    column.type == YapDatabaseSecondaryIndexTypeReal    ||
+			    column.type == YapDatabaseSecondaryIndexTypeNumeric  )
 			{
 				if ([columnValue isKindOfClass:[NSNumber class]])
 				{
-					__unsafe_unretained NSNumber *cast = (NSNumber *)columnValue;
+					__unsafe_unretained NSNumber *number = (NSNumber *)columnValue;
 					
-					int64_t num = [cast longLongValue];
-					sqlite3_bind_int64(statement, bind_idx, (sqlite3_int64)num);
-				}
-				else
-				{
-					YDBLogWarn(@"Unable to bind value for column(name=%@, type=integer) with unsupported class: %@."
-					           @" Column requires NSNumber.",
-					           column.name, NSStringFromClass([columnValue class]));
-				}
-			}
-			else if (column.type == YapDatabaseSecondaryIndexTypeReal)
-			{
-				if ([columnValue isKindOfClass:[NSNumber class]])
-				{
-					__unsafe_unretained NSNumber *cast = (NSNumber *)columnValue;
+					CFNumberType numberType = CFNumberGetType((CFNumberRef)number);
 					
-					double num = [cast doubleValue];
-					sqlite3_bind_double(statement, bind_idx, num);
+					if (numberType == kCFNumberFloat32Type ||
+						numberType == kCFNumberFloat64Type ||
+						numberType == kCFNumberFloatType   ||
+						numberType == kCFNumberDoubleType  ||
+						numberType == kCFNumberCGFloatType  )
+					{
+						double num = [number doubleValue];
+						sqlite3_bind_double(statement, bind_idx, num);
+					}
+					else
+					{
+						int64_t num = [number longLongValue];
+						sqlite3_bind_int64(statement, bind_idx, (sqlite3_int64)num);
+					}
 				}
 				else if ([columnValue isKindOfClass:[NSDate class]])
 				{
-					__unsafe_unretained NSDate *cast = (NSDate *)columnValue;
+					__unsafe_unretained NSDate *date = (NSDate *)columnValue;
 					
-					double num = [cast timeIntervalSinceReferenceDate];
+					double num = [date timeIntervalSinceReferenceDate];
 					sqlite3_bind_double(statement, bind_idx, num);
 				}
 				else
 				{
-					YDBLogWarn(@"Unable to bind value for column(name=%@, type=real) with unsupported class: %@."
+					YDBLogWarn(@"Unable to bind value for column(name=%@, type=%@) with unsupported class: %@."
 					           @" Column requires NSNumber or NSDate.",
-					           column.name, NSStringFromClass([columnValue class]));
+					           column.name,
+					           NSStringFromYapDatabaseSecondaryIndexType(column.type),
+					           NSStringFromClass([columnValue class]));
 				}
 			}
-			else // if (column.type == YapDatabaseSecondaryIndexTypeText)
+			else if (column.type == YapDatabaseSecondaryIndexTypeText)
 			{
 				if ([columnValue isKindOfClass:[NSString class]])
 				{
-					__unsafe_unretained NSString *cast = (NSString *)columnValue;
+					__unsafe_unretained NSString *string = (NSString *)columnValue;
 					
-					sqlite3_bind_text(statement, bind_idx, [cast UTF8String], -1, SQLITE_TRANSIENT);
+					sqlite3_bind_text(statement, bind_idx, [string UTF8String], -1, SQLITE_TRANSIENT);
 				}
 				else
 				{
 					YDBLogWarn(@"Unable to bind value for column(name=%@, type=text) with unsupported class: %@."
 					           @" Column requires NSString.",
+					           column.name, NSStringFromClass([columnValue class]));
+				}
+			}
+			else if (column.type == YapDatabaseSecondaryIndexTypeBlob)
+			{
+				if ([columnValue isKindOfClass:[NSData class]])
+				{
+					__unsafe_unretained NSData *data = (NSData *)columnValue;
+					
+					sqlite3_bind_blob(statement, bind_idx, [data bytes], (int)[data length], SQLITE_STATIC);
+				}
+				else
+				{
+					YDBLogWarn(@"Unable to bind value for column(name=%@, type=text) with unsupported class: %@."
+					           @" Column requires NSData.",
 					           column.name, NSStringFromClass([columnValue class]));
 				}
 			}
@@ -548,14 +578,14 @@ static NSString *const ext_key_version_deprecated = @"version";
 	sqlite3_clear_bindings(statement);
 	sqlite3_reset(statement);
 	
-	isMutated = YES;
+	[parentConnection->mutationStack markAsMutated];
 }
 
 - (void)removeRowid:(int64_t)rowid
 {
 	YDBLogAutoTrace();
 	
-	sqlite3_stmt *statement = [secondaryIndexConnection removeStatement];
+	sqlite3_stmt *statement = [parentConnection removeStatement];
 	if (statement == NULL) return;
 	
 	// DELETE FROM "tableName" WHERE "rowid" = ?;
@@ -574,7 +604,7 @@ static NSString *const ext_key_version_deprecated = @"version";
 	sqlite3_clear_bindings(statement);
 	sqlite3_reset(statement);
 	
-	isMutated = YES;
+	[parentConnection->mutationStack markAsMutated];
 }
 
 - (void)removeRowids:(NSArray *)rowids
@@ -639,14 +669,14 @@ static NSString *const ext_key_version_deprecated = @"version";
 	
 	sqlite3_finalize(statement);
 	
-	isMutated = YES;
+	[parentConnection->mutationStack markAsMutated];
 }
 
 - (void)removeAllRowids
 {
 	YDBLogAutoTrace();
 	
-	sqlite3_stmt *statement = [secondaryIndexConnection removeAllStatement];
+	sqlite3_stmt *statement = [parentConnection removeAllStatement];
 	if (statement == NULL)
 		return;
 	
@@ -659,14 +689,14 @@ static NSString *const ext_key_version_deprecated = @"version";
 	status = sqlite3_step(statement);
 	if (status != SQLITE_DONE)
 	{
-		YDBLogError(@"%@ (%@): Error in removeAllStatement: %d %s",
-		            THIS_METHOD, [self registeredName],
+		YDBLogError(@"(%@): Error in removeAllStatement: %d %s",
+		            [self registeredName],
 		            status, sqlite3_errmsg(databaseTransaction->connection->db));
 	}
 	
 	sqlite3_reset(statement);
 	
-	isMutated = YES;
+	[parentConnection->mutationStack markAsMutated];
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -678,13 +708,17 @@ static NSString *const ext_key_version_deprecated = @"version";
 **/
 - (void)didCommitTransaction
 {
+	YDBLogAutoTrace();
+	
+	[parentConnection postCommitCleanup];
+	
 	// An extensionTransaction is only valid within the scope of its encompassing databaseTransaction.
 	// I imagine this may occasionally be misunderstood, and developers may attempt to store the extension in an ivar,
 	// and then use it outside the context of the database transaction block.
 	// Thus, this code is here as a safety net to ensure that such accidental misuse doesn't do any damage.
 	
-	secondaryIndexConnection = nil; // Do not remove !
-	databaseTransaction = nil;      // Do not remove !
+	parentConnection = nil;    // Do not remove !
+	databaseTransaction = nil; // Do not remove !
 }
 
 /**
@@ -692,13 +726,17 @@ static NSString *const ext_key_version_deprecated = @"version";
 **/
 - (void)didRollbackTransaction
 {
+	YDBLogAutoTrace();
+	
+	[parentConnection postRollbackCleanup];
+	
 	// An extensionTransaction is only valid within the scope of its encompassing databaseTransaction.
 	// I imagine this may occasionally be misunderstood, and developers may attempt to store the extension in an ivar,
 	// and then use it outside the context of the database transaction block.
 	// Thus, this code is here as a safety net to ensure that such accidental misuse doesn't do any damage.
 	
-	secondaryIndexConnection = nil; // Do not remove !
-	databaseTransaction = nil;      // Do not remove !
+	parentConnection = nil;    // Do not remove !
+	databaseTransaction = nil; // Do not remove !
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -706,17 +744,17 @@ static NSString *const ext_key_version_deprecated = @"version";
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /**
- * YapDatabase extension hook.
- * This method is invoked by a YapDatabaseReadWriteTransaction as a post-operation-hook.
+ * Private helper method for other handleXXX hook methods.
 **/
-- (void)handleInsertObject:(id)object
-          forCollectionKey:(YapCollectionKey *)collectionKey
-              withMetadata:(id)metadata
-                     rowid:(int64_t)rowid
+- (void)_handleChangeWithRowid:(int64_t)rowid
+                 collectionKey:(YapCollectionKey *)collectionKey
+                        object:(id)object
+                      metadata:(id)metadata
+                      isInsert:(BOOL)isInsert
 {
 	YDBLogAutoTrace();
 	
-	__unsafe_unretained YapDatabaseSecondaryIndex *secondaryIndex = secondaryIndexConnection->secondaryIndex;
+	__unsafe_unretained YapDatabaseSecondaryIndex *secondaryIndex = parentConnection->parent;
 	
 	__unsafe_unretained NSString *collection = collectionKey.collection;
 	__unsafe_unretained NSString *key = collectionKey.key;
@@ -729,116 +767,54 @@ static NSString *const ext_key_version_deprecated = @"version";
 	
 	// Invoke the block to find out if the object should be included in the index.
 	
-	if (secondaryIndex->blockType == YapDatabaseSecondaryIndexBlockTypeWithKey)
+	YapDatabaseSecondaryIndexHandler *handler = secondaryIndex->handler;
+	YapDatabaseBlockType blockType = handler->blockType;
+	
+	if (blockType == YapDatabaseBlockTypeWithKey)
 	{
 		__unsafe_unretained YapDatabaseSecondaryIndexWithKeyBlock block =
-		    (YapDatabaseSecondaryIndexWithKeyBlock)secondaryIndex->block;
+		    (YapDatabaseSecondaryIndexWithKeyBlock)handler->block;
 		
-		block(secondaryIndexConnection->blockDict, collection, key);
+		block(databaseTransaction, parentConnection->blockDict, collection, key);
 	}
-	else if (secondaryIndex->blockType == YapDatabaseSecondaryIndexBlockTypeWithObject)
+	else if (blockType == YapDatabaseBlockTypeWithObject)
 	{
 		__unsafe_unretained YapDatabaseSecondaryIndexWithObjectBlock block =
-		    (YapDatabaseSecondaryIndexWithObjectBlock)secondaryIndex->block;
+		    (YapDatabaseSecondaryIndexWithObjectBlock)handler->block;
 		
-		block(secondaryIndexConnection->blockDict, collection, key, object);
+		block(databaseTransaction, parentConnection->blockDict, collection, key, object);
 	}
-	else if (secondaryIndex->blockType == YapDatabaseSecondaryIndexBlockTypeWithMetadata)
+	else if (blockType == YapDatabaseBlockTypeWithMetadata)
 	{
 		__unsafe_unretained YapDatabaseSecondaryIndexWithMetadataBlock block =
-		    (YapDatabaseSecondaryIndexWithMetadataBlock)secondaryIndex->block;
+		    (YapDatabaseSecondaryIndexWithMetadataBlock)handler->block;
 		
-		block(secondaryIndexConnection->blockDict, collection, key, metadata);
+		block(databaseTransaction, parentConnection->blockDict, collection, key, metadata);
 	}
 	else
 	{
 		__unsafe_unretained YapDatabaseSecondaryIndexWithRowBlock block =
-		    (YapDatabaseSecondaryIndexWithRowBlock)secondaryIndex->block;
+		    (YapDatabaseSecondaryIndexWithRowBlock)handler->block;
 		
-		block(secondaryIndexConnection->blockDict, collection, key, object, metadata);
+		block(databaseTransaction, parentConnection->blockDict, collection, key, object, metadata);
 	}
 	
-	if ([secondaryIndexConnection->blockDict count] == 0)
-	{
-		// This was an insert operation, so we don't have to worry about removing anything.
-	}
-	else
-	{
-		// Add values to index.
-		// This was an insert operation, so we know we can insert rather than update.
-		
-		[self addRowid:rowid isNew:YES];
-		[secondaryIndexConnection->blockDict removeAllObjects];
-	}
-}
-
-/**
- * YapDatabase extension hook.
- * This method is invoked by a YapDatabaseReadWriteTransaction as a post-operation-hook.
-**/
-- (void)handleUpdateObject:(id)object
-          forCollectionKey:(YapCollectionKey *)collectionKey
-              withMetadata:(id)metadata
-                     rowid:(int64_t)rowid
-{
-	YDBLogAutoTrace();
-	
-	__unsafe_unretained YapDatabaseSecondaryIndex *secondaryIndex = secondaryIndexConnection->secondaryIndex;
-	
-	__unsafe_unretained NSString *collection = collectionKey.collection;
-	__unsafe_unretained NSString *key = collectionKey.key;
-	
-	__unsafe_unretained YapWhitelistBlacklist *allowedCollections = secondaryIndex->options.allowedCollections;
-	if (allowedCollections && ![allowedCollections isAllowed:collection])
-	{
-		return;
-	}
-	
-	// Invoke the block to find out if the object should be included in the index.
-	
-	if (secondaryIndex->blockType == YapDatabaseSecondaryIndexBlockTypeWithKey)
-	{
-		__unsafe_unretained YapDatabaseSecondaryIndexWithKeyBlock block =
-		    (YapDatabaseSecondaryIndexWithKeyBlock)secondaryIndex->block;
-		
-		block(secondaryIndexConnection->blockDict, collection, key);
-	}
-	else if (secondaryIndex->blockType == YapDatabaseSecondaryIndexBlockTypeWithObject)
-	{
-		__unsafe_unretained YapDatabaseSecondaryIndexWithObjectBlock block =
-		    (YapDatabaseSecondaryIndexWithObjectBlock)secondaryIndex->block;
-		
-		block(secondaryIndexConnection->blockDict, collection, key, object);
-	}
-	else if (secondaryIndex->blockType == YapDatabaseSecondaryIndexBlockTypeWithMetadata)
-	{
-		__unsafe_unretained YapDatabaseSecondaryIndexWithMetadataBlock block =
-		    (YapDatabaseSecondaryIndexWithMetadataBlock)secondaryIndex->block;
-		
-		block(secondaryIndexConnection->blockDict, collection, key, metadata);
-	}
-	else
-	{
-		__unsafe_unretained YapDatabaseSecondaryIndexWithRowBlock block =
-		    (YapDatabaseSecondaryIndexWithRowBlock)secondaryIndex->block;
-		
-		block(secondaryIndexConnection->blockDict, collection, key, object, metadata);
-	}
-	
-	if ([secondaryIndexConnection->blockDict count] == 0)
+	if ([parentConnection->blockDict count] == 0)
 	{
 		// Remove associated values from index (if needed).
-		// This was an update operation, so the rowid may have previously had values in the index.
 		
-		[self removeRowid:rowid];
+		if (!isInsert)
+		{
+			[self removeRowid:rowid];
+		}
 	}
 	else
 	{
 		// Add values to index (or update them).
 		// This was an update operation, so we need to insert or update.
 		
-		[self addRowid:rowid isNew:NO];
-		[secondaryIndexConnection->blockDict removeAllObjects];
+		[self addRowid:rowid isNew:isInsert];
+		[parentConnection->blockDict removeAllObjects];
 	}
 }
 
@@ -846,169 +822,226 @@ static NSString *const ext_key_version_deprecated = @"version";
  * YapDatabase extension hook.
  * This method is invoked by a YapDatabaseReadWriteTransaction as a post-operation-hook.
 **/
-- (void)handleReplaceObject:(id)object forCollectionKey:(YapCollectionKey *)collectionKey withRowid:(int64_t)rowid
+- (void)didInsertObject:(id)object
+       forCollectionKey:(YapCollectionKey *)collectionKey
+           withMetadata:(id)metadata
+                  rowid:(int64_t)rowid
 {
 	YDBLogAutoTrace();
 	
-	__unsafe_unretained YapDatabaseSecondaryIndex *secondaryIndex = secondaryIndexConnection->secondaryIndex;
+	[self _handleChangeWithRowid:rowid
+	               collectionKey:collectionKey
+	                      object:object
+	                    metadata:metadata
+	                    isInsert:YES];
+}
+
+/**
+ * YapDatabase extension hook.
+ * This method is invoked by a YapDatabaseReadWriteTransaction as a post-operation-hook.
+**/
+- (void)didUpdateObject:(id)object
+       forCollectionKey:(YapCollectionKey *)collectionKey
+           withMetadata:(id)metadata
+                  rowid:(int64_t)rowid
+{
+	YDBLogAutoTrace();
 	
-	__unsafe_unretained NSString *collection = collectionKey.collection;
-	__unsafe_unretained NSString *key = collectionKey.key;
+	__unsafe_unretained YapDatabaseSecondaryIndex *secondaryIndex = parentConnection->parent;
+	__unsafe_unretained YapDatabaseSecondaryIndexHandler *handler = secondaryIndex->handler;
 	
-	__unsafe_unretained YapWhitelistBlacklist *allowedCollections = secondaryIndex->options.allowedCollections;
-	if (allowedCollections && ![allowedCollections isAllowed:collection])
+	YapDatabaseBlockInvoke blockInvokeBitMask = YapDatabaseBlockInvokeIfObjectModified |
+	                                            YapDatabaseBlockInvokeIfMetadataModified;
+	
+	if (!(handler->blockInvokeOptions & blockInvokeBitMask))
 	{
 		return;
 	}
 	
-	// Invoke the block to find out if the object should be included in the index.
+	[self _handleChangeWithRowid:rowid
+	               collectionKey:collectionKey
+	                      object:object
+	                    metadata:metadata
+	                    isInsert:NO];
+}
+
+/**
+ * YapDatabase extension hook.
+ * This method is invoked by a YapDatabaseReadWriteTransaction as a post-operation-hook.
+**/
+- (void)didReplaceObject:(id)object forCollectionKey:(YapCollectionKey *)collectionKey withRowid:(int64_t)rowid
+{
+	YDBLogAutoTrace();
+	
+	__unsafe_unretained YapDatabaseSecondaryIndex *secondaryIndex = parentConnection->parent;
+	__unsafe_unretained YapDatabaseSecondaryIndexHandler *handler = secondaryIndex->handler;
+	
+	YapDatabaseBlockInvoke blockInvokeBitMask = YapDatabaseBlockInvokeIfObjectModified;
+	
+	if (!(handler->blockInvokeOptions & blockInvokeBitMask))
+	{
+		return;
+	}
 	
 	id metadata = nil;
+	if (handler->blockType & YapDatabaseBlockType_MetadataFlag)
+	{
+		metadata = [databaseTransaction metadataForCollectionKey:collectionKey withRowid:rowid];
+	}
 	
-	if (secondaryIndex->blockType == YapDatabaseSecondaryIndexBlockTypeWithKey ||
-	    secondaryIndex->blockType == YapDatabaseSecondaryIndexBlockTypeWithMetadata)
-	{
-		// Index values are based on the key or object.
-		// Neither have changed, and thus the values haven't changed.
-		
-		return;
-	}
-	else
-	{
-		// Index values are based on object or row (object+metadata).
-		// Invoke block to see what the new values are.
-		
-		if (secondaryIndex->blockType == YapDatabaseSecondaryIndexBlockTypeWithObject)
-		{
-			__unsafe_unretained YapDatabaseSecondaryIndexWithObjectBlock block =
-			  (YapDatabaseSecondaryIndexWithObjectBlock)secondaryIndex->block;
-			
-			block(secondaryIndexConnection->blockDict, collection, key, object);
-		}
-		else
-		{
-			__unsafe_unretained YapDatabaseSecondaryIndexWithRowBlock block =
-			  (YapDatabaseSecondaryIndexWithRowBlock)secondaryIndex->block;
-			
-			metadata = [databaseTransaction metadataForCollectionKey:collectionKey withRowid:rowid];
-			block(secondaryIndexConnection->blockDict, collection, key, object, metadata);
-		}
-		
-		if ([secondaryIndexConnection->blockDict count] == 0)
-		{
-			// Remove associated values from index (if needed).
-			// This was an update operation, so the rowid may have previously had values in the index.
-			
-			[self removeRowid:rowid];
-		}
-		else
-		{
-			// Add values to index (or update them).
-			// This was an update operation, so we need to insert or update.
-			
-			[self addRowid:rowid isNew:NO];
-			[secondaryIndexConnection->blockDict removeAllObjects];
-		}
-	}
+	[self _handleChangeWithRowid:rowid
+	               collectionKey:collectionKey
+	                      object:object
+	                    metadata:metadata
+	                    isInsert:NO];
 }
 
 /**
  * YapDatabase extension hook.
  * This method is invoked by a YapDatabaseReadWriteTransaction as a post-operation-hook.
 **/
-- (void)handleReplaceMetadata:(id)metadata forCollectionKey:(YapCollectionKey *)collectionKey withRowid:(int64_t)rowid
+- (void)didReplaceMetadata:(id)metadata forCollectionKey:(YapCollectionKey *)collectionKey withRowid:(int64_t)rowid
 {
 	YDBLogAutoTrace();
 	
-	__unsafe_unretained YapDatabaseSecondaryIndex *secondaryIndex = secondaryIndexConnection->secondaryIndex;
+	__unsafe_unretained YapDatabaseSecondaryIndex *secondaryIndex = parentConnection->parent;
+	__unsafe_unretained YapDatabaseSecondaryIndexHandler *handler = secondaryIndex->handler;
 	
-	__unsafe_unretained NSString *collection = collectionKey.collection;
-	__unsafe_unretained NSString *key = collectionKey.key;
+	YapDatabaseBlockInvoke blockInvokeBitMask = YapDatabaseBlockInvokeIfMetadataModified;
 	
-	__unsafe_unretained YapWhitelistBlacklist *allowedCollections = secondaryIndex->options.allowedCollections;
-	if (allowedCollections && ![allowedCollections isAllowed:collection])
+	if (!(handler->blockInvokeOptions & blockInvokeBitMask))
 	{
 		return;
 	}
-	
-	// Invoke the block to find out if the object should be included in the index.
 	
 	id object = nil;
-	
-	if (secondaryIndex->blockType == YapDatabaseSecondaryIndexBlockTypeWithKey ||
-	    secondaryIndex->blockType == YapDatabaseSecondaryIndexBlockTypeWithObject)
+	if (handler->blockType & YapDatabaseBlockType_ObjectFlag)
 	{
-		// Index values are based on the key or object.
-		// Neither have changed, and thus the values haven't changed.
-		
+		object = [databaseTransaction objectForCollectionKey:collectionKey withRowid:rowid];
+	}
+	
+	[self _handleChangeWithRowid:rowid
+	               collectionKey:collectionKey
+	                      object:object
+	                    metadata:metadata
+	                    isInsert:NO];
+}
+
+/**
+ * YapDatabase extension hook.
+ * This method is invoked by a YapDatabaseReadWriteTransaction as a post-operation-hook.
+**/
+- (void)didTouchObjectForCollectionKey:(YapCollectionKey __unused *)collectionKey withRowid:(int64_t __unused)rowid
+{
+	__unsafe_unretained YapDatabaseSecondaryIndex *secondaryIndex = parentConnection->parent;
+	__unsafe_unretained YapDatabaseSecondaryIndexHandler *handler = secondaryIndex->handler;
+	
+	YapDatabaseBlockInvoke blockInvokeBitMask = YapDatabaseBlockInvokeIfObjectTouched;
+	
+	if (!(handler->blockInvokeOptions & blockInvokeBitMask))
+	{
 		return;
 	}
-	else
+	
+	id object = nil;
+	if (handler->blockType & YapDatabaseBlockType_ObjectFlag)
 	{
-		// Index values are based on metadata or objectAndMetadata.
-		// Invoke block to see what the new values are.
-		
-		if (secondaryIndex->blockType == YapDatabaseSecondaryIndexBlockTypeWithMetadata)
-		{
-			__unsafe_unretained YapDatabaseSecondaryIndexWithMetadataBlock block =
-		        (YapDatabaseSecondaryIndexWithMetadataBlock)secondaryIndex->block;
-			
-			block(secondaryIndexConnection->blockDict, collection, key, metadata);
-		}
-		else
-		{
-			__unsafe_unretained YapDatabaseSecondaryIndexWithRowBlock block =
-		        (YapDatabaseSecondaryIndexWithRowBlock)secondaryIndex->block;
-			
-			object = [databaseTransaction objectForCollectionKey:collectionKey withRowid:rowid];
-			block(secondaryIndexConnection->blockDict, collection, key, object, metadata);
-		}
-		
-		if ([secondaryIndexConnection->blockDict count] == 0)
-		{
-			// Remove associated values from index (if needed).
-			// This was an update operation, so the rowid may have previously had values in the index.
-			
-			[self removeRowid:rowid];
-		}
-		else
-		{
-			// Add values to index (or update them).
-			// This was an update operation, so we need to insert or update.
-			
-			[self addRowid:rowid isNew:NO];
-			[secondaryIndexConnection->blockDict removeAllObjects];
-		}
+		object = [databaseTransaction objectForCollectionKey:collectionKey withRowid:rowid];
 	}
+	
+	id metadata = nil;
+	if (handler->blockType & YapDatabaseBlockType_MetadataFlag)
+	{
+		metadata = [databaseTransaction metadataForCollectionKey:collectionKey withRowid:rowid];
+	}
+	
+	[self _handleChangeWithRowid:rowid
+	               collectionKey:collectionKey
+	                      object:object
+	                    metadata:metadata
+	                    isInsert:NO];
 }
 
 /**
  * YapDatabase extension hook.
  * This method is invoked by a YapDatabaseReadWriteTransaction as a post-operation-hook.
 **/
-- (void)handleTouchObjectForCollectionKey:(YapCollectionKey __unused *)collectionKey withRowid:(int64_t __unused)rowid
+- (void)didTouchMetadataForCollectionKey:(YapCollectionKey __unused *)collectionKey withRowid:(int64_t __unused)rowid
 {
-	// Nothing to do for this extension
+	__unsafe_unretained YapDatabaseSecondaryIndex *secondaryIndex = parentConnection->parent;
+	__unsafe_unretained YapDatabaseSecondaryIndexHandler *handler = secondaryIndex->handler;
+	
+	YapDatabaseBlockInvoke blockInvokeBitMask = YapDatabaseBlockInvokeIfMetadataTouched;
+	
+	if (!(handler->blockInvokeOptions & blockInvokeBitMask))
+	{
+		return;
+	}
+	
+	id object = nil;
+	if (handler->blockType & YapDatabaseBlockType_ObjectFlag)
+	{
+		object = [databaseTransaction objectForCollectionKey:collectionKey withRowid:rowid];
+	}
+	
+	id metadata = nil;
+	if (handler->blockType & YapDatabaseBlockType_MetadataFlag)
+	{
+		metadata = [databaseTransaction metadataForCollectionKey:collectionKey withRowid:rowid];
+	}
+	
+	[self _handleChangeWithRowid:rowid
+	               collectionKey:collectionKey
+	                      object:object
+	                    metadata:metadata
+	                    isInsert:NO];
 }
 
 /**
  * YapDatabase extension hook.
  * This method is invoked by a YapDatabaseReadWriteTransaction as a post-operation-hook.
 **/
-- (void)handleTouchMetadataForCollectionKey:(YapCollectionKey __unused *)collectionKey withRowid:(int64_t __unused)rowid
+- (void)didTouchRowForCollectionKey:(YapCollectionKey *)collectionKey withRowid:(int64_t)rowid
 {
-	// Nothing to do for this extension
+	__unsafe_unretained YapDatabaseSecondaryIndex *secondaryIndex = parentConnection->parent;
+	__unsafe_unretained YapDatabaseSecondaryIndexHandler *handler = secondaryIndex->handler;
+	
+	YapDatabaseBlockInvoke blockInvokeBitMask = YapDatabaseBlockInvokeIfObjectTouched |
+	                                            YapDatabaseBlockInvokeIfMetadataTouched;
+	
+	if (!(handler->blockInvokeOptions & blockInvokeBitMask))
+	{
+		return;
+	}
+	
+	id object = nil;
+	if (handler->blockType & YapDatabaseBlockType_ObjectFlag)
+	{
+		object = [databaseTransaction objectForCollectionKey:collectionKey withRowid:rowid];
+	}
+	
+	id metadata = nil;
+	if (handler->blockType & YapDatabaseBlockType_MetadataFlag)
+	{
+		metadata = [databaseTransaction metadataForCollectionKey:collectionKey withRowid:rowid];
+	}
+	
+	[self _handleChangeWithRowid:rowid
+	               collectionKey:collectionKey
+	                      object:object
+	                    metadata:metadata
+	                    isInsert:NO];
 }
 
 /**
  * YapDatabase extension hook.
  * This method is invoked by a YapDatabaseReadWriteTransaction as a post-operation-hook.
 **/
-- (void)handleRemoveObjectForCollectionKey:(YapCollectionKey *)collectionKey withRowid:(int64_t)rowid
+- (void)didRemoveObjectForCollectionKey:(YapCollectionKey *)collectionKey withRowid:(int64_t)rowid
 {
 	YDBLogAutoTrace();
 	
-	__unsafe_unretained YapDatabaseSecondaryIndex *secondaryIndex = secondaryIndexConnection->secondaryIndex;
+	__unsafe_unretained YapDatabaseSecondaryIndex *secondaryIndex = parentConnection->parent;
 	
 	__unsafe_unretained YapWhitelistBlacklist *allowedCollections = secondaryIndex->options.allowedCollections;
 	if (allowedCollections && ![allowedCollections isAllowed:collectionKey.collection])
@@ -1023,11 +1056,11 @@ static NSString *const ext_key_version_deprecated = @"version";
  * YapDatabase extension hook.
  * This method is invoked by a YapDatabaseReadWriteTransaction as a post-operation-hook.
 **/
-- (void)handleRemoveObjectsForKeys:(NSArray __unused *)keys inCollection:(NSString *)collection withRowids:(NSArray *)rowids
+- (void)didRemoveObjectsForKeys:(NSArray __unused *)keys inCollection:(NSString *)collection withRowids:(NSArray *)rowids
 {
 	YDBLogAutoTrace();
 	
-	__unsafe_unretained YapDatabaseSecondaryIndex *secondaryIndex = secondaryIndexConnection->secondaryIndex;
+	__unsafe_unretained YapDatabaseSecondaryIndex *secondaryIndex = parentConnection->parent;
 	
 	__unsafe_unretained YapWhitelistBlacklist *allowedCollections = secondaryIndex->options.allowedCollections;
 	if (allowedCollections && ![allowedCollections isAllowed:collection])
@@ -1042,7 +1075,7 @@ static NSString *const ext_key_version_deprecated = @"version";
  * YapDatabase extension hook.
  * This method is invoked by a YapDatabaseReadWriteTransaction as a post-operation-hook.
 **/
-- (void)handleRemoveAllObjectsInAllCollections
+- (void)didRemoveAllObjectsInAllCollections
 {
 	YDBLogAutoTrace();
 	
@@ -1050,23 +1083,14 @@ static NSString *const ext_key_version_deprecated = @"version";
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-#pragma mark Enumerate
+#pragma mark Utilities
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-- (BOOL)_enumerateRowidsMatchingQuery:(YapDatabaseQuery *)query
-                           usingBlock:(void (^)(int64_t rowid, BOOL *stop))block
+- (sqlite3_stmt *)prepareQueryString:(NSString *)fullQueryString
 {
-	// Create full query using given filtering clause(s)
-	
-	NSString *fullQueryString =
-	    [NSString stringWithFormat:@"SELECT \"rowid\" FROM \"%@\" %@;", [self tableName], query.queryString];
-	
-	// Turn query into compiled sqlite statement.
-	// Use cache if possible.
-	
 	sqlite3_stmt *statement = NULL;
 	
-	YapDatabaseStatement *wrapper = [secondaryIndexConnection->queryCache objectForKey:fullQueryString];
+	YapDatabaseStatement *wrapper = [parentConnection->queryCache objectForKey:fullQueryString];
 	if (wrapper)
 	{
 		statement = wrapper.stmt;
@@ -1076,25 +1100,31 @@ static NSString *const ext_key_version_deprecated = @"version";
 		sqlite3 *db = databaseTransaction->connection->db;
 		
 		int status = sqlite3_prepare_v2(db, [fullQueryString UTF8String], -1, &statement, NULL);
-		if (status != SQLITE_OK)
+		if (status == SQLITE_OK)
 		{
-			YDBLogError(@"%@: Error creating query:\n query: '%@'\n error: %d %s",
-						THIS_METHOD, fullQueryString, status, sqlite3_errmsg(db));
-			
-			return NO;
+			if (parentConnection->queryCache)
+			{
+				wrapper = [[YapDatabaseStatement alloc] initWithStatement:statement];
+				[parentConnection->queryCache setObject:wrapper forKey:fullQueryString];
+			}
 		}
-		
-		if (secondaryIndexConnection->queryCache)
+		else
 		{
-			wrapper = [[YapDatabaseStatement alloc] initWithStatement:statement];
-			[secondaryIndexConnection->queryCache setObject:wrapper forKey:fullQueryString];
+			YDBLogError(@"Error creating query:\n query: '%@'\n error: %d %s",
+			             fullQueryString, status, sqlite3_errmsg(db));
+			
+			return NULL;
 		}
 	}
 	
-	// Bind query parameters appropriately.
+	return statement;
+}
+
+- (void)bindQueryParameters:(NSArray *)queryParams forStatement:(sqlite3_stmt *)statement withOffset:(int)bind_idx_start
+{
+	int bind_idx = bind_idx_start;
 	
-	int bind_idx = SQLITE_BIND_START;
-	for (id value in query.queryParameters)
+	for (id value in queryParams)
 	{
 		if ([value isKindOfClass:[NSNumber class]])
 		{
@@ -1130,10 +1160,6 @@ static NSString *const ext_key_version_deprecated = @"version";
 			
 			sqlite3_bind_text(statement, bind_idx, [cast UTF8String], -1, SQLITE_TRANSIENT);
 		}
-		else if ([value isKindOfClass:[NSNull class]])
-		{
-			sqlite3_bind_null(statement, bind_idx);
-		}
 		else
 		{
 			YDBLogWarn(@"Unable to bind value for with unsupported class: %@", NSStringFromClass([value class]));
@@ -1141,39 +1167,60 @@ static NSString *const ext_key_version_deprecated = @"version";
 		
 		bind_idx++;
 	}
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#pragma mark Standard Query - Enumerate
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+- (BOOL)_enumerateRowidsMatchingQuery:(YapDatabaseQuery *)query
+                           usingBlock:(void (NS_NOESCAPE^)(int64_t rowid, BOOL *stop))block
+{
+	if (query == nil) return NO;
+	if (query.isAggregateQuery) return NO;
+	
+	// Create full query using given filtering clause(s)
+	
+	NSString *fullQueryString =
+	    [NSString stringWithFormat:@"SELECT \"rowid\" FROM \"%@\" %@;", [self tableName], query.queryString];
+	
+	// Turn query into compiled sqlite statement (using cache if possible)
+	
+	sqlite3_stmt *statement = [self prepareQueryString:fullQueryString];
+	if (statement == NULL)
+	{
+		return NO;
+	}
+	
+	// Bind query parameters appropriately.
+	
+	[self bindQueryParameters:query.queryParameters forStatement:statement withOffset:SQLITE_BIND_START];
 	
 	// Enumerate query results
 	
 	BOOL stop = NO;
-	isMutated = NO; // mutation during enumeration protection
+	YapMutationStackItem_Bool *mutation = [parentConnection->mutationStack push]; // mutation during enum protection
 	
-	int status = sqlite3_step(statement);
-	if (status == SQLITE_ROW)
+	int status;
+	while ((status = sqlite3_step(statement)) == SQLITE_ROW)
 	{
-		if (databaseTransaction->connection->needsMarkSqlLevelSharedReadLock)
-			[databaseTransaction->connection markSqlLevelSharedReadLockAcquired];
+		int64_t rowid = sqlite3_column_int64(statement, SQLITE_COLUMN_START);
 		
-		do
-		{
-			int64_t rowid = sqlite3_column_int64(statement, SQLITE_COLUMN_START);
+		block(rowid, &stop);
 			
-			block(rowid, &stop);
-			
-			if (stop || isMutated) break;
-			
-		} while ((status = sqlite3_step(statement)) == SQLITE_ROW);
+		if (stop || mutation.isMutated) break;
 	}
 	
-	if ((status != SQLITE_DONE) && !stop && !isMutated)
+	if ((status != SQLITE_DONE) && !stop && !mutation.isMutated)
 	{
-		YDBLogError(@"%@ - sqlite_step error: %d %s", THIS_METHOD,
+		YDBLogError(@"sqlite_step error: %d %s",
 		            status, sqlite3_errmsg(databaseTransaction->connection->db));
 	}
 	
 	sqlite3_clear_bindings(statement);
 	sqlite3_reset(statement);
 	
-	if (isMutated && !stop)
+	if (!stop && mutation.isMutated)
 	{
 		@throw [self mutationDuringEnumerationException];
 	}
@@ -1182,14 +1229,17 @@ static NSString *const ext_key_version_deprecated = @"version";
 }
 
 - (BOOL)enumerateKeysMatchingQuery:(YapDatabaseQuery *)query
-                        usingBlock:(void (^)(NSString *collection, NSString *key, BOOL *stop))block
+                        usingBlock:(void (NS_NOESCAPE^)(NSString *collection, NSString *key, BOOL *stop))block
 {
-	if (query == nil) return NO;
-	if (block == nil) return NO;
-	
 	BOOL result = [self _enumerateRowidsMatchingQuery:query usingBlock:^(int64_t rowid, BOOL *stop) {
 		
-		YapCollectionKey *ck = [databaseTransaction collectionKeyForRowid:rowid];
+		if (block == NULL) // Query test : caller still wants BOOL result
+		{
+			*stop = YES;
+			return; // from block
+		}
+		
+		YapCollectionKey *ck = [self->databaseTransaction collectionKeyForRowid:rowid];
 		
 		block(ck.collection, ck.key, stop);
 	}];
@@ -1199,16 +1249,19 @@ static NSString *const ext_key_version_deprecated = @"version";
 
 - (BOOL)enumerateKeysAndMetadataMatchingQuery:(YapDatabaseQuery *)query
                                    usingBlock:
-                            (void (^)(NSString *collection, NSString *key, id metadata, BOOL *stop))block
+                            (void (NS_NOESCAPE^)(NSString *collection, NSString *key, id metadata, BOOL *stop))block
 {
-	if (query == nil) return NO;
-	if (block == nil) return NO;
-	
 	BOOL result = [self _enumerateRowidsMatchingQuery:query usingBlock:^(int64_t rowid, BOOL *stop) {
+		
+		if (block == NULL) // Query test : caller still wants BOOL result
+		{
+			*stop = YES;
+			return; // from block
+		}
 		
 		YapCollectionKey *ck = nil;
 		id metadata = nil;
-		[databaseTransaction getCollectionKey:&ck metadata:&metadata forRowid:rowid];
+		[self->databaseTransaction getCollectionKey:&ck metadata:&metadata forRowid:rowid];
 		
 		block(ck.collection, ck.key, metadata, stop);
 	}];
@@ -1218,16 +1271,19 @@ static NSString *const ext_key_version_deprecated = @"version";
 
 - (BOOL)enumerateKeysAndObjectsMatchingQuery:(YapDatabaseQuery *)query
                                   usingBlock:
-                            (void (^)(NSString *collection, NSString *key, id object, BOOL *stop))block
+                            (void (NS_NOESCAPE^)(NSString *collection, NSString *key, id object, BOOL *stop))block
 {
-	if (query == nil) return NO;
-	if (block == nil) return NO;
-	
 	BOOL result = [self _enumerateRowidsMatchingQuery:query usingBlock:^(int64_t rowid, BOOL *stop) {
+		
+		if (block == NULL) // Query test : caller still wants BOOL result
+		{
+			*stop = YES;
+			return; // from block
+		}
 		
 		YapCollectionKey *ck = nil;
 		id object = nil;
-		[databaseTransaction getCollectionKey:&ck object:&object forRowid:rowid];
+		[self->databaseTransaction getCollectionKey:&ck object:&object forRowid:rowid];
 		
 		block(ck.collection, ck.key, object, stop);
 	}];
@@ -1237,17 +1293,20 @@ static NSString *const ext_key_version_deprecated = @"version";
 
 - (BOOL)enumerateRowsMatchingQuery:(YapDatabaseQuery *)query
                         usingBlock:
-                            (void (^)(NSString *collection, NSString *key, id object, id metadata, BOOL *stop))block
+                            (void (NS_NOESCAPE^)(NSString *collection, NSString *key, id object, id metadata, BOOL *stop))block
 {
-	if (query == nil) return NO;
-	if (block == nil) return NO;
-	
 	BOOL result = [self _enumerateRowidsMatchingQuery:query usingBlock:^(int64_t rowid, BOOL *stop) {
+		
+		if (block == NULL) // Query test : caller still wants BOOL result
+		{
+			*stop = YES;
+			return; // from block
+		}
 		
 		YapCollectionKey *ck = nil;
 		id object = nil;
 		id metadata = nil;
-		[databaseTransaction getCollectionKey:&ck object:&object metadata:&metadata forRowid:rowid];
+		[self->databaseTransaction getCollectionKey:&ck object:&object metadata:&metadata forRowid:rowid];
 		
 		block(ck.collection, ck.key, object, metadata, stop);
 	}];
@@ -1255,8 +1314,119 @@ static NSString *const ext_key_version_deprecated = @"version";
 	return result;
 }
 
+- (BOOL)_enumerateIndexedValuesInColumn:(NSString *)column
+                          matchingQuery:(YapDatabaseQuery *)query
+                             usingBlock:(void (NS_NOESCAPE^)(id indexedValue, BOOL *stop))block
+{
+	if (column == nil) return NO;
+	if (query == nil) return NO;
+	if (query.isAggregateQuery) return NO;
+
+	// Create full query using given filtering clause(s)
+
+	NSString *fullQueryString =
+	  [NSString stringWithFormat:@"SELECT \"%@\" AS IndexedValue FROM \"%@\" %@;",
+	  column, [self tableName], query.queryString];
+
+	// Turn query into compiled sqlite statement (using cache if possible)
+
+	sqlite3_stmt *statement = [self prepareQueryString:fullQueryString];
+	if (statement == NULL)
+	{
+		return NO;
+	}
+
+	// Bind query parameters appropriately.
+
+	[self bindQueryParameters:query.queryParameters forStatement:statement withOffset:SQLITE_BIND_START];
+
+	// Enumerate query results
+
+	BOOL stop = NO;
+	YapMutationStackItem_Bool *mutation = [parentConnection->mutationStack push]; // mutation during enum protection
+
+	int status;
+	while ((status = sqlite3_step(statement)) == SQLITE_ROW)
+	{
+		int columnType = sqlite3_column_type(statement, SQLITE_COLUMN_START);
+		id indexedValue = nil;
+
+		switch(columnType) {
+			case SQLITE_INTEGER:
+			{
+				int64_t value = sqlite3_column_int64(statement, SQLITE_COLUMN_START);
+				indexedValue = @(value);
+				break;
+			}
+			
+			case SQLITE_FLOAT:
+			{
+				double value = sqlite3_column_double(statement, SQLITE_COLUMN_START);
+				indexedValue = @(value);
+				break;
+			}
+
+			case SQLITE_TEXT:
+			{
+				const unsigned char *text = sqlite3_column_text(statement, SQLITE_COLUMN_START);
+				int textSize = sqlite3_column_bytes(statement, SQLITE_COLUMN_START);
+				indexedValue = [[NSString alloc] initWithBytes:text length:textSize encoding:NSUTF8StringEncoding];
+				break;
+			}
+
+			case SQLITE_BLOB:
+			{
+				const void *value = sqlite3_column_blob(statement, SQLITE_COLUMN_START);
+				int valueSize = sqlite3_column_bytes(statement, SQLITE_COLUMN_START);
+				indexedValue = [[NSData alloc] initWithBytes:value length:valueSize];
+				break;
+			}
+		}
+		
+		block(indexedValue, &stop);
+
+		if (stop || mutation.isMutated) break;
+	}
+
+	if ((status != SQLITE_DONE) && !stop && !mutation.isMutated)
+	{
+		YDBLogError(@"sqlite_step error: %d %s",
+					status, sqlite3_errmsg(databaseTransaction->connection->db));
+	}
+
+	sqlite3_clear_bindings(statement);
+	sqlite3_reset(statement);
+
+	if (!stop && mutation.isMutated)
+	{
+		@throw [self mutationDuringEnumerationException];
+	}
+
+	return (status == SQLITE_DONE);
+}
+
+- (BOOL)enumerateIndexedValuesInColumn:(NSString *)column
+                         matchingQuery:(YapDatabaseQuery *)query
+                            usingBlock:(void(NS_NOESCAPE^)(id indexedValue, BOOL *stop))block
+{
+	BOOL result = [self _enumerateIndexedValuesInColumn:column
+	                                      matchingQuery:query
+	                                         usingBlock:^(id indexedValue, BOOL *stop)
+	{
+		if (block == NULL) // Query test : caller still wants BOOL result
+		{
+			*stop = YES;
+			return; // from block
+		}
+
+		block(indexedValue, stop);
+	}];
+
+	return result;
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-#pragma mark Count
+#pragma mark Standard Query - Count
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 - (BOOL)getNumberOfRows:(NSUInteger *)countPtr matchingQuery:(YapDatabaseQuery *)query
@@ -1267,82 +1437,17 @@ static NSString *const ext_key_version_deprecated = @"version";
 	    [NSString stringWithFormat:@"SELECT COUNT(*) AS NumberOfRows FROM \"%@\" %@;",
 	                                                           [self tableName], query.queryString];
 	
-	// Turn query into compiled sqlite statement.
-	// Use cache if possible.
+	// Turn query into compiled sqlite statement (using cache if possible)
 	
-	sqlite3_stmt *statement = NULL;
-	
-	YapDatabaseStatement *wrapper = [secondaryIndexConnection->queryCache objectForKey:fullQueryString];
-	if (wrapper)
+	sqlite3_stmt *statement = [self prepareQueryString:fullQueryString];
+	if (statement == NULL)
 	{
-		statement = wrapper.stmt;
-	}
-	else
-	{
-		sqlite3 *db = databaseTransaction->connection->db;
-		
-		int status = sqlite3_prepare_v2(db, [fullQueryString UTF8String], -1, &statement, NULL);
-		if (status != SQLITE_OK)
-		{
-			YDBLogError(@"%@: Error creating query:\n query: '%@'\n error: %d %s",
-						THIS_METHOD, fullQueryString, status, sqlite3_errmsg(db));
-			
-			return NO;
-		}
-		
-		if (secondaryIndexConnection->queryCache)
-		{
-			wrapper = [[YapDatabaseStatement alloc] initWithStatement:statement];
-			[secondaryIndexConnection->queryCache setObject:wrapper forKey:fullQueryString];
-		}
+		return NO;
 	}
 	
-	// Bind query parameters appropriately.
+	// Bind query parameters appropriately
 	
-	int bind_idx = SQLITE_BIND_START;
-	for (id value in query.queryParameters)
-	{
-		if ([value isKindOfClass:[NSNumber class]])
-		{
-			__unsafe_unretained NSNumber *cast = (NSNumber *)value;
-			
-			CFNumberType numType = CFNumberGetType((__bridge CFNumberRef)cast);
-			
-			if (numType == kCFNumberFloatType   ||
-			    numType == kCFNumberFloat32Type ||
-			    numType == kCFNumberFloat64Type ||
-			    numType == kCFNumberDoubleType  ||
-			    numType == kCFNumberCGFloatType  )
-			{
-				double num = [cast doubleValue];
-				sqlite3_bind_double(statement, bind_idx, num);
-			}
-			else
-			{
-				int64_t num = [cast longLongValue];
-				sqlite3_bind_int64(statement, bind_idx, (sqlite3_int64)num);
-			}
-		}
-		else if ([value isKindOfClass:[NSDate class]])
-		{
-			__unsafe_unretained NSDate *cast = (NSDate *)value;
-			
-			double num = [cast timeIntervalSinceReferenceDate];
-			sqlite3_bind_double(statement, bind_idx, num);
-		}
-		else if ([value isKindOfClass:[NSString class]])
-		{
-			__unsafe_unretained NSString *cast = (NSString *)value;
-			
-			sqlite3_bind_text(statement, bind_idx, [cast UTF8String], -1, SQLITE_TRANSIENT);
-		}
-		else
-		{
-			YDBLogWarn(@"Unable to bind value for with unsupported class: %@", NSStringFromClass([value class]));
-		}
-		
-		bind_idx++;
-	}
+	[self bindQueryParameters:query.queryParameters forStatement:statement withOffset:SQLITE_BIND_START];
 	
 	// Execute query
 	
@@ -1352,14 +1457,11 @@ static NSString *const ext_key_version_deprecated = @"version";
 	int status = sqlite3_step(statement);
 	if (status == SQLITE_ROW)
 	{
-		if (databaseTransaction->connection->needsMarkSqlLevelSharedReadLock)
-			[databaseTransaction->connection markSqlLevelSharedReadLockAcquired];
-		
 		count = (NSUInteger)sqlite3_column_int64(statement, SQLITE_COLUMN_START);
 	}
 	else if (status == SQLITE_ERROR)
 	{
-		YDBLogError(@"%@ - sqlite_step error: %d %s", THIS_METHOD,
+		YDBLogError(@"sqlite_step error: %d %s",
 		            status, sqlite3_errmsg(databaseTransaction->connection->db));
 		result = NO;
 	}
@@ -1369,6 +1471,118 @@ static NSString *const ext_key_version_deprecated = @"version";
 	
 	if (countPtr) *countPtr = count;
 	return result;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#pragma mark Aggregate Query
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+- (id)performAggregateQuery:(YapDatabaseQuery *)query
+{
+	if (query == nil) return nil;
+	if (query.isAggregateQuery == NO) return nil;
+	
+	NSString *fullQueryString =
+	    [NSString stringWithFormat:@"SELECT %@ AS Result FROM \"%@\" %@;",
+	                                        query.aggregateFunction, [self tableName], query.queryString];
+	
+	// Turn query into compiled sqlite statement (using cache if possible)
+	
+	sqlite3_stmt *statement = [self prepareQueryString:fullQueryString];
+	if (statement == NULL)
+	{
+		return nil;
+	}
+	
+	// Bind query parameters appropriately
+	
+	[self bindQueryParameters:query.queryParameters forStatement:statement withOffset:SQLITE_BIND_START];
+	
+	// Execute query
+	
+	id result = nil;
+	
+	int status = sqlite3_step(statement);
+	if (status == SQLITE_ROW)
+	{
+		int column_idx = SQLITE_COLUMN_START;
+		int column_type = sqlite3_column_type(statement, column_idx);
+		
+		if (column_type == SQLITE_INTEGER)
+		{
+			int64_t num = sqlite3_column_int64(statement, column_idx);
+			result = @(num);
+		}
+		else if (column_type == SQLITE_FLOAT)
+		{
+			double num = sqlite3_column_double(statement, column_idx);
+			result = @(num);
+		}
+		else if (column_type == SQLITE_TEXT)
+		{
+			const unsigned char *text = sqlite3_column_text(statement, column_idx);
+			int textSize = sqlite3_column_bytes(statement, column_idx);
+			
+			result = [[NSString alloc] initWithBytes:text length:textSize encoding:NSUTF8StringEncoding];
+		}
+		else if (column_type == SQLITE_BLOB)
+		{
+			const void *blob = sqlite3_column_blob(statement, column_idx);
+			int blobSize = sqlite3_column_bytes(statement, column_idx);
+			
+			result = [[NSData alloc] initWithBytes:blob length:blobSize];
+		}
+		else if (column_type == SQLITE_NULL)
+		{
+			result = [NSNull null];
+		}
+	}
+	else if (status == SQLITE_ERROR)
+	{
+		YDBLogError(@"sqlite_step error: %d %s",
+		            status, sqlite3_errmsg(databaseTransaction->connection->db));
+	}
+	
+	sqlite3_clear_bindings(statement);
+	sqlite3_reset(statement);
+	
+	return result;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#pragma mark Query Utilities
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+/**
+ * This method assists in performing a query over a subset of rows,
+ * where the subset is a known set of keys.
+ * 
+ * For example:
+ * 
+ * Say you have a bunch of tracks & playlist objects in the database.
+ * And you've added a secondary index on track.duration.
+ * Now you want to quickly figure out the duration of an entire playlist.
+ * 
+ * NSArray *keys = [self trackKeysInPlaylist:playlist];
+ * NSArray *rowids = [[[transaction ext:@"idx"] rowidsForKeys:keys inCollection:@"tracks"] allValues];
+ *
+ * YapDatabaseQuery *query =
+ *   [YapDatabaseQuery queryWithAggregateFunction:@"SUM(duration)" format:@"WHERE rowid IN (?)", rowids];
+**/
+- (NSDictionary<NSString*, NSNumber*> *)rowidsForKeys:(NSArray<NSString *> *)keys
+                                         inCollection:(nullable NSString *)collection
+{
+	NSMutableDictionary<NSString*, NSNumber*> *results = [NSMutableDictionary dictionaryWithCapacity:keys.count];
+	
+	[databaseTransaction _enumerateRowidsForKeys:keys
+	                                inCollection:collection
+	                         unorderedUsingBlock:^(NSUInteger keyIndex, int64_t rowid, BOOL *stop)
+	{
+		NSString *key = keys[keyIndex];
+		results[key] = @(rowid);
+	}];
+	
+	return results;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

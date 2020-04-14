@@ -16,12 +16,12 @@ static NSMutableArray *keys;
 	return @"BenchmarkYapDatabase.sqlite";
 }
 
-+ (NSString *)databasePath
++ (NSURL *)databaseURL
 {
-	NSArray *paths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
-	NSString *baseDir = ([paths count] > 0) ? [paths objectAtIndex:0] : NSTemporaryDirectory();
+	NSArray<NSURL*> *urls = [[NSFileManager defaultManager] URLsForDirectory:NSCachesDirectory inDomains:NSUserDomainMask];
+	NSURL *baseDir = [urls firstObject];
 	
-	return [baseDir stringByAppendingPathComponent:[self databaseName]];
+	return [baseDir URLByAppendingPathComponent:[self databaseName] isDirectory:NO];
 }
 
 + (NSString *)randomLetters:(NSUInteger)length
@@ -171,8 +171,11 @@ static NSMutableArray *keys;
 	
 	NSTimeInterval elapsed = [start timeIntervalSinceNow] * -1.0;
 	
-	NSLog(@"Fetch %lu random objs: total time: %.6f, average time per obj: %.6f (cache hit %%: %.2f)",
-		  (unsigned long)loopCount, elapsed, (elapsed / loopCount), hitPercentage);
+	double avg = (elapsed / loopCount);
+	double perSec = 1.0 / avg;
+	
+	NSLog(@"Fetch %lu random objs (cache hit %%: %.2f): total time: %.6f, avg time per obj: %.6f, obj per sec: %.0f",
+		  (unsigned long)loopCount, hitPercentage, elapsed, avg, perSec);
 }
 
 + (void)readTransactionOverhead:(NSUInteger)loopCount withLongLivedReadTransaction:(BOOL)useLongLivedReadTransaction
@@ -233,10 +236,10 @@ static NSMutableArray *keys;
 
 + (void)runTestsWithCompletion:(dispatch_block_t)completionBlock
 {
-	NSString *databasePath = [self databasePath];
+	NSURL *databaseURL = [self databaseURL];
 	
 	// Delete old database file (if exists)
-	[[NSFileManager defaultManager] removeItemAtPath:databasePath error:NULL];
+	[[NSFileManager defaultManager] removeItemAtURL:databaseURL error:nil];
 	
 	// Create database
 	YapDatabaseOptions *options = [[YapDatabaseOptions alloc] init];
@@ -245,10 +248,7 @@ static NSMutableArray *keys;
 
 	options.pragmaMMapSize = (1024 * 1024 * 25); // full file size, with max of 25 MB
 	
-	database = [[YapDatabase alloc] initWithPath:databasePath
-	                                  serializer:NULL
-	                                deserializer:NULL
-	                                     options:options];
+	database = [[YapDatabase alloc] initWithURL:databaseURL options:options];
 	
 	// Create database connection (can have multiple for concurrency)
 	connection = [database newConnection];
@@ -274,7 +274,7 @@ static NSMutableArray *keys;
 		NSLog(@"YapDatabase Benchmarks:");
 		NSLog(@" - sqlite version     = %@", database.sqliteVersion);
 		NSLog(@" - pragma synchronous = %@", pragmaSynchronousStr);
-		NSLog(@" - pragma mmap_size   = %ld", [connection pragmaMMapSize]);
+		NSLog(@" - pragma mmap_size   = %ld", (long)[connection pragmaMMapSize]);
 		NSLog(@"====================================================");
 		NSLog(@"POPULATE DATABASE");
 		

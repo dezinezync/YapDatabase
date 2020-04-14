@@ -17,9 +17,9 @@
  * See YapDatabaseLogging.h for more information.
  **/
 #if DEBUG
-static const int ydbLogLevel = YDB_LOG_LEVEL_WARN;
+static const int ydbLogLevel = YDBLogLevelWarning;
 #else
-static const int ydbLogLevel = YDB_LOG_LEVEL_WARN;
+static const int ydbLogLevel = YDBLogLevelWarning;
 #endif
 
 @implementation YapDatabaseRTreeIndexConnection
@@ -30,14 +30,13 @@ static const int ydbLogLevel = YDB_LOG_LEVEL_WARN;
 	sqlite3_stmt *removeAllStatement;
 }
 
-@synthesize rTreeIndex = rTreeIndex;
+@synthesize rTreeIndex = parent;
 
-- (id)initWithRTreeIndex:(YapDatabaseRTreeIndex *)inRTreeIndex
-          databaseConnection:(YapDatabaseConnection *)inDatabaseConnection
+- (id)initWithParent:(YapDatabaseRTreeIndex *)inParent databaseConnection:(YapDatabaseConnection *)inDatabaseConnection
 {
 	if ((self = [super init]))
 	{
-		rTreeIndex = inRTreeIndex;
+		parent = inParent;
 		databaseConnection = inDatabaseConnection;
 
 		queryCacheLimit = 10;
@@ -87,7 +86,7 @@ static const int ydbLogLevel = YDB_LOG_LEVEL_WARN;
 **/
 - (YapDatabaseExtension *)extension
 {
-	return rTreeIndex;
+	return parent;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -100,7 +99,7 @@ static const int ydbLogLevel = YDB_LOG_LEVEL_WARN;
 
 	dispatch_block_t block = ^{
 
-		result = (queryCache == nil) ? NO : YES;
+		result = (self->queryCache == nil) ? NO : YES;
 	};
 
 	if (dispatch_get_specific(databaseConnection->IsOnConnectionQueueKey))
@@ -117,16 +116,16 @@ static const int ydbLogLevel = YDB_LOG_LEVEL_WARN;
 
 		if (queryCacheEnabled)
 		{
-			if (queryCache == nil)
+			if (self->queryCache == nil)
 			{
-				queryCache = [[YapCache alloc] initWithCountLimit:queryCacheLimit];
-				queryCache.allowedKeyClasses = [NSSet setWithObject:[NSString class]];
-				queryCache.allowedObjectClasses = [NSSet setWithObject:[YapDatabaseStatement class]];
+				self->queryCache = [[YapCache alloc] initWithCountLimit:self->queryCacheLimit];
+				self->queryCache.allowedKeyClasses = [NSSet setWithObject:[NSString class]];
+				self->queryCache.allowedObjectClasses = [NSSet setWithObject:[YapDatabaseStatement class]];
 			}
 		}
 		else
 		{
-			queryCache = nil;
+			self->queryCache = nil;
 		}
 	};
 
@@ -142,7 +141,7 @@ static const int ydbLogLevel = YDB_LOG_LEVEL_WARN;
 
 	dispatch_block_t block = ^{
 
-		result = queryCacheLimit;
+		result = self->queryCacheLimit;
 	};
 
 	if (dispatch_get_specific(databaseConnection->IsOnConnectionQueueKey))
@@ -157,8 +156,8 @@ static const int ydbLogLevel = YDB_LOG_LEVEL_WARN;
 {
 	dispatch_block_t block = ^{
 
-		queryCacheLimit = newQueryCacheLimit;
-		queryCache.countLimit = queryCacheLimit;
+		self->queryCacheLimit = newQueryCacheLimit;
+		self->queryCache.countLimit = self->queryCacheLimit;
 	};
 
 	if (dispatch_get_specific(databaseConnection->IsOnConnectionQueueKey))
@@ -177,9 +176,8 @@ static const int ydbLogLevel = YDB_LOG_LEVEL_WARN;
 - (id)newReadTransaction:(YapDatabaseReadTransaction *)databaseTransaction
 {
 	YapDatabaseRTreeIndexTransaction *transaction =
-	    [[YapDatabaseRTreeIndexTransaction alloc]
-	        initWithRTreeIndexConnection:self
-	                     databaseTransaction:databaseTransaction];
+	    [[YapDatabaseRTreeIndexTransaction alloc] initWithParentConnection:self
+	                                                   databaseTransaction:databaseTransaction];
 
 	return transaction;
 }
@@ -190,19 +188,38 @@ static const int ydbLogLevel = YDB_LOG_LEVEL_WARN;
 - (id)newReadWriteTransaction:(YapDatabaseReadWriteTransaction *)databaseTransaction
 {
 	YapDatabaseRTreeIndexTransaction *transaction =
-	    [[YapDatabaseRTreeIndexTransaction alloc]
-	        initWithRTreeIndexConnection:self
-	                     databaseTransaction:databaseTransaction];
+	    [[YapDatabaseRTreeIndexTransaction alloc] initWithParentConnection:self
+	                                                   databaseTransaction:databaseTransaction];
 
-	if (blockDict == nil)
-		blockDict = [NSMutableDictionary dictionaryWithSharedKeySet:rTreeIndex->columnNamesSharedKeySet];
-
+	[self prepareForReadWriteTransaction];
 	return transaction;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #pragma mark Changeset
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+/**
+ * Initializes any ivars that a read-write transaction may need.
+ **/
+- (void)prepareForReadWriteTransaction
+{
+	if (blockDict == nil)
+		blockDict = [NSMutableDictionary dictionaryWithSharedKeySet:parent->columnNamesSharedKeySet];
+	
+	if (mutationStack == nil)
+		mutationStack = [[YapMutationStack_Bool alloc] init];
+}
+
+- (void)postCommitCleanup
+{
+	[mutationStack clear];
+}
+
+- (void)postRollbackCleanup
+{
+	[mutationStack clear];
+}
 
 /**
  * Required override method from YapDatabaseExtension
@@ -253,16 +270,16 @@ static const int ydbLogLevel = YDB_LOG_LEVEL_WARN;
 	if (*statement == NULL)
 	{
 		NSMutableString *string = [NSMutableString stringWithCapacity:100];
-		[string appendFormat:@"INSERT INTO \"%@\" (\"rowid\"", [rTreeIndex tableName]];
+		[string appendFormat:@"INSERT INTO \"%@\" (\"rowid\"", [parent tableName]];
 
-		for (NSString *columnName in rTreeIndex->setup)
+		for (NSString *columnName in parent->setup)
 		{
 			[string appendFormat:@", \"%@\"", columnName];
 		}
 
 		[string appendString:@") VALUES (?"];
 
-		NSUInteger count = [rTreeIndex->setup count];
+		NSUInteger count = [parent->setup count];
 		NSUInteger i;
 		for (i = 0; i < count; i++)
 		{
@@ -283,16 +300,16 @@ static const int ydbLogLevel = YDB_LOG_LEVEL_WARN;
 	if (*statement == NULL)
 	{
 		NSMutableString *string = [NSMutableString stringWithCapacity:100];
-		[string appendFormat:@"INSERT OR REPLACE INTO \"%@\" (\"rowid\"", [rTreeIndex tableName]];
+		[string appendFormat:@"INSERT OR REPLACE INTO \"%@\" (\"rowid\"", [parent tableName]];
 
-		for (NSString *columnName in rTreeIndex->setup)
+		for (NSString *columnName in parent->setup)
 		{
 			[string appendFormat:@", \"%@\"", columnName];
 		}
 
 		[string appendString:@") VALUES (?"];
 
-		NSUInteger count = [rTreeIndex->setup count];
+		NSUInteger count = [parent->setup count];
 		NSUInteger i;
 		for (i = 0; i < count; i++)
 		{
@@ -313,7 +330,7 @@ static const int ydbLogLevel = YDB_LOG_LEVEL_WARN;
 	if (*statement == NULL)
 	{
 		NSString *string = [NSString stringWithFormat:
-		  @"DELETE FROM \"%@\" WHERE \"rowid\" = ?;", [rTreeIndex tableName]];
+		  @"DELETE FROM \"%@\" WHERE \"rowid\" = ?;", [parent tableName]];
 
 		[self prepareStatement:statement withString:string caller:_cmd];
 	}
@@ -327,7 +344,7 @@ static const int ydbLogLevel = YDB_LOG_LEVEL_WARN;
 	if (*statement == NULL)
 	{
 		NSString *string = [NSString stringWithFormat:
-		  @"DELETE FROM \"%@\";", [rTreeIndex tableName]];
+		  @"DELETE FROM \"%@\";", [parent tableName]];
 
 		[self prepareStatement:statement withString:string caller:_cmd];
 	}

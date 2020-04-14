@@ -3,6 +3,8 @@
 
 @class YapDatabaseFullTextSearch;
 
+NS_ASSUME_NONNULL_BEGIN
+
 /**
  * Welcome to YapDatabase!
  *
@@ -21,12 +23,14 @@
  *
  * @see YapDatabaseFullTextSearch
  * @see YapDatabaseFullTextSearchTransaction
-**/
+ */
 @interface YapDatabaseFullTextSearchConnection : YapDatabaseExtensionConnection
 
 /**
  * Returns the parent instance.
-**/
+ */
 @property (nonatomic, strong, readonly) YapDatabaseFullTextSearch *fullTextSearch;
 
 @end
+
+NS_ASSUME_NONNULL_END

@@ -3,6 +3,8 @@
 
 @class YapDatabaseRelationship;
 
+NS_ASSUME_NONNULL_BEGIN
+
 /**
  * Welcome to YapDatabase!
  *
@@ -17,13 +19,15 @@
  *
  * For tons of information about this extension, see the wiki article:
  * https://github.com/yapstudios/YapDatabase/wiki/Relationships
-**/
+ */
 
 @interface YapDatabaseRelationshipConnection : YapDatabaseExtensionConnection
 
 /**
  * Returns the parent view instance.
-**/
+ */
 @property (nonatomic, strong, readonly) YapDatabaseRelationship *relationship;
 
 @end
+
+NS_ASSUME_NONNULL_END

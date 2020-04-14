@@ -1,8 +1,16 @@
 #import <XCTest/XCTest.h>
 
+#import <YapDatabase/YapCollectionKey.h>
+
+#if PODFILE_USE_FRAMEWORKS
+// Works with `use_frameworks`, but not with `use_modular_headers`
+#import <YapDatabase/YapDatabaseViewChangePrivate.h>
+#import <YapDatabase/YapDatabaseViewMappingsPrivate.h>
+#else
+// Works with `use_modular_headers`, but not with `use_frameworks`
 #import "YapDatabaseViewChangePrivate.h"
 #import "YapDatabaseViewMappingsPrivate.h"
-#import "YapCollectionKey.h"
+#endif
 
 #define YCK(collection, key) YapCollectionKeyCreate(collection, key)
 
@@ -1007,7 +1015,7 @@ static YapDatabaseViewRowChange* (^RowOp)(NSArray*, NSUInteger) = ^(NSArray *rCh
 	YapDatabaseViewMappings *mappings;
 	YapDatabaseViewMappings *originalMappings;
 	
-	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A"] view:nil];
+	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A"] view:@""];
 	mappings.isDynamicSectionForAllGroups = YES;
 	
 	[mappings updateWithCounts:@{ @"A": @(0) } forceUpdateRangeOptions:NO];
@@ -1048,7 +1056,7 @@ static YapDatabaseViewRowChange* (^RowOp)(NSArray*, NSUInteger) = ^(NSArray *rCh
 	YapDatabaseViewMappings *mappings;
 	YapDatabaseViewMappings *originalMappings;
 	
-	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A"] view:nil];
+	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A"] view:@""];
 	mappings.isDynamicSectionForAllGroups = NO; // <-- static sections
 	
 	[mappings updateWithCounts:@{ @"A": @(0) } forceUpdateRangeOptions:NO];
@@ -1092,7 +1100,7 @@ static YapDatabaseViewRowChange* (^RowOp)(NSArray*, NSUInteger) = ^(NSArray *rCh
 	YapDatabaseViewMappings *mappings;
 	YapDatabaseViewMappings *originalMappings;
 	
-	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A"] view:nil];
+	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A"] view:@""];
 	mappings.isDynamicSectionForAllGroups = YES;
 	
 	[mappings updateWithCounts:@{ @"A": @(1) } forceUpdateRangeOptions:NO];
@@ -1133,7 +1141,7 @@ static YapDatabaseViewRowChange* (^RowOp)(NSArray*, NSUInteger) = ^(NSArray *rCh
 	YapDatabaseViewMappings *mappings;
 	YapDatabaseViewMappings *originalMappings;
 	
-	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A"] view:nil];
+	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A"] view:@""];
 	mappings.isDynamicSectionForAllGroups = NO; // <-- static sections
 	
 	[mappings updateWithCounts:@{ @"A": @(1) } forceUpdateRangeOptions:NO];
@@ -1181,7 +1189,7 @@ static YapDatabaseViewRowChange* (^RowOp)(NSArray*, NSUInteger) = ^(NSArray *rCh
 	YapDatabaseViewMappings *mappings;
 	YapDatabaseViewMappings *originalMappings;
 	
-	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B"] view:nil];
+	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B"] view:@""];
 	mappings.isDynamicSectionForAllGroups = YES;
 	
 	[mappings updateWithCounts:@{ @"A": @(1), @"B" : @(0) } forceUpdateRangeOptions:NO];
@@ -1234,7 +1242,7 @@ static YapDatabaseViewRowChange* (^RowOp)(NSArray*, NSUInteger) = ^(NSArray *rCh
 	YapDatabaseViewMappings *mappings;
 	YapDatabaseViewMappings *originalMappings;
 	
-	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B"] view:nil];
+	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B"] view:@""];
 	mappings.isDynamicSectionForAllGroups = YES;
 	
 	[mappings updateWithCounts:@{ @"A": @(0), @"B" : @(1) } forceUpdateRangeOptions:NO];
@@ -1291,7 +1299,7 @@ static YapDatabaseViewRowChange* (^RowOp)(NSArray*, NSUInteger) = ^(NSArray *rCh
 	YapDatabaseViewMappings *mappings;
 	YapDatabaseViewMappings *originalMappings;
 	
-	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B"] view:nil];
+	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B"] view:@""];
 	mappings.isDynamicSectionForAllGroups = YES;
 	
 	[mappings updateWithCounts:@{ @"A": @(1), @"B" : @(0) } forceUpdateRangeOptions:NO];
@@ -1350,7 +1358,7 @@ static YapDatabaseViewRowChange* (^RowOp)(NSArray*, NSUInteger) = ^(NSArray *rCh
 	YapDatabaseViewMappings *mappings;
 	YapDatabaseViewMappings *originalMappings;
 	
-	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B"] view:nil];
+	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B"] view:@""];
 	mappings.isDynamicSectionForAllGroups = YES;
 	
 	[mappings updateWithCounts:@{ @"A": @(0), @"B" : @(1) } forceUpdateRangeOptions:NO];
@@ -1410,7 +1418,7 @@ static YapDatabaseViewRowChange* (^RowOp)(NSArray*, NSUInteger) = ^(NSArray *rCh
 	YapDatabaseViewMappings *mappings;
 	YapDatabaseViewMappings *originalMappings;
 	
-	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B"] view:nil];
+	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B"] view:@""];
 	mappings.isDynamicSectionForAllGroups = YES;
 	
 	[mappings updateWithCounts:@{ @"A": @(1), @"B" : @(1) } forceUpdateRangeOptions:NO];
@@ -1464,7 +1472,7 @@ static YapDatabaseViewRowChange* (^RowOp)(NSArray*, NSUInteger) = ^(NSArray *rCh
 	YapDatabaseViewMappings *mappings;
 	YapDatabaseViewMappings *originalMappings;
 	
-	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B"] view:nil];
+	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B"] view:@""];
 	mappings.isDynamicSectionForAllGroups = YES;
 	
 	[mappings updateWithCounts:@{ @"A": @(1), @"B" : @(1) } forceUpdateRangeOptions:NO];
@@ -1520,7 +1528,7 @@ static YapDatabaseViewRowChange* (^RowOp)(NSArray*, NSUInteger) = ^(NSArray *rCh
 	YapDatabaseViewMappings *mappings;
 	YapDatabaseViewMappings *originalMappings;
 	
-	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B"] view:nil];
+	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B"] view:@""];
 	mappings.isDynamicSectionForAllGroups = YES;
 	
 	[mappings updateWithCounts:@{ @"A": @(1), @"B" : @(1) } forceUpdateRangeOptions:NO];
@@ -1578,7 +1586,7 @@ static YapDatabaseViewRowChange* (^RowOp)(NSArray*, NSUInteger) = ^(NSArray *rCh
 	YapDatabaseViewMappings *mappings;
 	YapDatabaseViewMappings *originalMappings;
 	
-	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B"] view:nil];
+	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B"] view:@""];
 	mappings.isDynamicSectionForAllGroups = YES;
 	
 	[mappings updateWithCounts:@{ @"A": @(1), @"B" : @(1) } forceUpdateRangeOptions:NO];
@@ -1640,7 +1648,7 @@ static YapDatabaseViewRowChange* (^RowOp)(NSArray*, NSUInteger) = ^(NSArray *rCh
 	YapDatabaseViewMappings *mappings;
 	YapDatabaseViewMappings *originalMappings;
 	
-	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B", @"C"] view:nil];
+	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B", @"C"] view:@""];
 	mappings.isDynamicSectionForAllGroups = YES;
 	
 	[mappings updateWithCounts:@{ @"A": @(1), @"B" : @(1), @"C" : @(0) } forceUpdateRangeOptions:NO];
@@ -1700,7 +1708,7 @@ static YapDatabaseViewRowChange* (^RowOp)(NSArray*, NSUInteger) = ^(NSArray *rCh
 	YapDatabaseViewMappings *mappings;
 	YapDatabaseViewMappings *originalMappings;
 	
-	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B", @"C"] view:nil];
+	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B", @"C"] view:@""];
 	mappings.isDynamicSectionForAllGroups = YES;
 	
 	[mappings updateWithCounts:@{ @"A": @(0), @"B" : @(1), @"C" : @(1) } forceUpdateRangeOptions:NO];
@@ -1760,7 +1768,7 @@ static YapDatabaseViewRowChange* (^RowOp)(NSArray*, NSUInteger) = ^(NSArray *rCh
 	YapDatabaseViewMappings *mappings;
 	YapDatabaseViewMappings *originalMappings;
 	
-	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B", @"C"] view:nil];
+	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B", @"C"] view:@""];
 	mappings.isDynamicSectionForAllGroups = YES;
 	
 	[mappings updateWithCounts:@{ @"A": @(1), @"B" : @(0), @"C" : @(1) } forceUpdateRangeOptions:NO];
@@ -1824,7 +1832,7 @@ static YapDatabaseViewRowChange* (^RowOp)(NSArray*, NSUInteger) = ^(NSArray *rCh
 	YapDatabaseViewMappings *mappings;
 	YapDatabaseViewMappings *originalMappings;
 	
-	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B", @"C"] view:nil];
+	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B", @"C"] view:@""];
 	mappings.isDynamicSectionForAllGroups = YES;
 	
 	[mappings updateWithCounts:@{ @"A": @(1), @"B" : @(0), @"C" : @(0) } forceUpdateRangeOptions:NO];
@@ -1884,7 +1892,7 @@ static YapDatabaseViewRowChange* (^RowOp)(NSArray*, NSUInteger) = ^(NSArray *rCh
 	YapDatabaseViewMappings *mappings;
 	YapDatabaseViewMappings *originalMappings;
 	
-	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B", @"C"] view:nil];
+	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B", @"C"] view:@""];
 	mappings.isDynamicSectionForAllGroups = YES;
 	
 	[mappings updateWithCounts:@{ @"A": @(1), @"B" : @(0), @"C" : @(0) } forceUpdateRangeOptions:NO];
@@ -1948,7 +1956,7 @@ static YapDatabaseViewRowChange* (^RowOp)(NSArray*, NSUInteger) = ^(NSArray *rCh
 	YapDatabaseViewMappings *mappings;
 	YapDatabaseViewMappings *originalMappings;
 	
-	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B", @"C"] view:nil];
+	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B", @"C"] view:@""];
 	mappings.isDynamicSectionForAllGroups = YES;
 	
 	[mappings updateWithCounts:@{ @"A": @(1), @"B" : @(1), @"C" : @(1) } forceUpdateRangeOptions:NO];
@@ -2008,7 +2016,7 @@ static YapDatabaseViewRowChange* (^RowOp)(NSArray*, NSUInteger) = ^(NSArray *rCh
 	YapDatabaseViewMappings *mappings;
 	YapDatabaseViewMappings *originalMappings;
 	
-	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B", @"C"] view:nil];
+	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B", @"C"] view:@""];
 	mappings.isDynamicSectionForAllGroups = YES;
 	
 	[mappings updateWithCounts:@{ @"A": @(1), @"B" : @(1), @"C" : @(1) } forceUpdateRangeOptions:NO];
@@ -2073,7 +2081,7 @@ static YapDatabaseViewRowChange* (^RowOp)(NSArray*, NSUInteger) = ^(NSArray *rCh
 	YapDatabaseViewMappings *mappings;
 	YapDatabaseViewMappings *originalMappings;
 	
-	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B"] view:nil];
+	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B"] view:@""];
 	mappings.isDynamicSectionForAllGroups = YES;
 	
 	[mappings updateWithCounts:@{ @"A": @(1), @"B" : @(0) } forceUpdateRangeOptions:NO];
@@ -2122,7 +2130,7 @@ static YapDatabaseViewRowChange* (^RowOp)(NSArray*, NSUInteger) = ^(NSArray *rCh
 	YapDatabaseViewMappings *mappings;
 	YapDatabaseViewMappings *originalMappings;
 	
-	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B"] view:nil];
+	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B"] view:@""];
 	mappings.isDynamicSectionForAllGroups = YES;
 	
 	[mappings updateWithCounts:@{ @"A": @(1), @"B": @(1) } forceUpdateRangeOptions:NO];
@@ -2175,7 +2183,7 @@ static YapDatabaseViewRowChange* (^RowOp)(NSArray*, NSUInteger) = ^(NSArray *rCh
 	YapDatabaseViewMappings *mappings;
 	YapDatabaseViewMappings *originalMappings;
 	
-	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B", @"C"] view:nil];
+	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B", @"C"] view:@""];
 	mappings.isDynamicSectionForAllGroups = YES;
 	
 	[mappings updateWithCounts:@{ @"A": @(1), @"B": @(0), @"C" : @(1) } forceUpdateRangeOptions:NO];
@@ -2237,7 +2245,7 @@ static YapDatabaseViewRowChange* (^RowOp)(NSArray*, NSUInteger) = ^(NSArray *rCh
 	YapDatabaseViewMappings *mappings;
 	YapDatabaseViewMappings *originalMappings;
 	
-	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A"] view:nil];
+	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A"] view:@""];
 	mappings.isDynamicSectionForAllGroups = YES;
 	
 	[mappings updateWithCounts:@{ @"A": @(1) } forceUpdateRangeOptions:NO];
@@ -2287,7 +2295,7 @@ static YapDatabaseViewRowChange* (^RowOp)(NSArray*, NSUInteger) = ^(NSArray *rCh
 	YapDatabaseViewMappings *mappings;
 	YapDatabaseViewMappings *originalMappings;
 	
-	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A"] view:nil];
+	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A"] view:@""];
 	mappings.isDynamicSectionForAllGroups = YES;
 	
 	[mappings updateWithCounts:@{ @"A": @(1) } forceUpdateRangeOptions:NO];
@@ -2341,7 +2349,7 @@ static YapDatabaseViewRowChange* (^RowOp)(NSArray*, NSUInteger) = ^(NSArray *rCh
 	YapDatabaseViewMappings *mappings;
 	YapDatabaseViewMappings *originalMappings;
 	
-	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A"] view:nil];
+	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A"] view:@""];
 	mappings.isDynamicSectionForAllGroups = YES;
 	
 	[mappings updateWithCounts:@{ @"A": @(1) } forceUpdateRangeOptions:NO];
@@ -2385,7 +2393,7 @@ static YapDatabaseViewRowChange* (^RowOp)(NSArray*, NSUInteger) = ^(NSArray *rCh
 	YapDatabaseViewMappings *mappings;
 	YapDatabaseViewMappings *originalMappings;
 	
-	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A"] view:nil];
+	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A"] view:@""];
 	mappings.isDynamicSectionForAllGroups = YES;
 	
 	[mappings updateWithCounts:@{ @"A": @(2) } forceUpdateRangeOptions:NO];
@@ -2435,7 +2443,7 @@ static YapDatabaseViewRowChange* (^RowOp)(NSArray*, NSUInteger) = ^(NSArray *rCh
 	YapDatabaseViewMappings *mappings;
 	YapDatabaseViewMappings *originalMappings;
 	
-	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A"] view:nil];
+	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A"] view:@""];
 	mappings.isDynamicSectionForAllGroups = NO; // <-- static sections
 	
 	[mappings updateWithCounts:@{ @"A": @(2) } forceUpdateRangeOptions:NO];
@@ -2485,7 +2493,7 @@ static YapDatabaseViewRowChange* (^RowOp)(NSArray*, NSUInteger) = ^(NSArray *rCh
 	YapDatabaseViewMappings *mappings;
 	YapDatabaseViewMappings *originalMappings;
 	
-	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A"] view:nil];
+	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A"] view:@""];
 	mappings.isDynamicSectionForAllGroups = YES;
 	
 	[mappings updateWithCounts:@{ @"A": @(2) } forceUpdateRangeOptions:NO];
@@ -2551,7 +2559,7 @@ static YapDatabaseViewRowChange* (^RowOp)(NSArray*, NSUInteger) = ^(NSArray *rCh
 	YapDatabaseViewMappings *mappings;
 	YapDatabaseViewMappings *originalMappings;
 	
-	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B"] view:nil];
+	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A", @"B"] view:@""];
 	mappings.isDynamicSectionForAllGroups = YES;
 	
 	[mappings updateWithCounts:@{ @"A": @(0), @"B": @(4) } forceUpdateRangeOptions:NO];
@@ -2608,7 +2616,7 @@ static YapDatabaseViewRowChange* (^RowOp)(NSArray*, NSUInteger) = ^(NSArray *rCh
 	YapDatabaseViewMappings *mappings;
 	YapDatabaseViewMappings *originalMappings;
 	
-	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A"] view:nil];
+	mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A"] view:@""];
 	mappings.isDynamicSectionForAllGroups = YES;
 	
 	[mappings updateWithCounts:@{ @"A": @(4) } forceUpdateRangeOptions:NO];
@@ -2724,7 +2732,7 @@ static YapDatabaseViewRowChange* (^RowOp)(NSArray*, NSUInteger) = ^(NSArray *rCh
 	NSArray *sectionChanges;
 	NSArray *rowChanges;
 	
-	YapDatabaseViewMappings *mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A"] view:nil];
+	YapDatabaseViewMappings *mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A"] view:@""];
 	
 	[mappings updateWithCounts:@{ @"A": @(2) } forceUpdateRangeOptions:NO];
 	YapDatabaseViewMappings *originalMappings = [mappings copy];
@@ -2777,7 +2785,7 @@ static YapDatabaseViewRowChange* (^RowOp)(NSArray*, NSUInteger) = ^(NSArray *rCh
 	NSArray *sectionChanges;
 	NSArray *rowChanges;
 	
-	YapDatabaseViewMappings *mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A"] view:nil];
+	YapDatabaseViewMappings *mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A"] view:@""];
 	[mappings setCellDrawingDependencyForNeighboringCellWithOffset:-1 forGroup:@"A"];
 	
 	[mappings updateWithCounts:@{ @"A": @(2) } forceUpdateRangeOptions:NO];
@@ -2835,7 +2843,7 @@ static YapDatabaseViewRowChange* (^RowOp)(NSArray*, NSUInteger) = ^(NSArray *rCh
 	NSArray *sectionChanges;
 	NSArray *rowChanges;
 	
-	YapDatabaseViewMappings *mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A"] view:nil];
+	YapDatabaseViewMappings *mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A"] view:@""];
 	[mappings setCellDrawingDependencyForNeighboringCellWithOffset:-1 forGroup:@"A"];
 	
 	[mappings updateWithCounts:@{ @"A": @(2) } forceUpdateRangeOptions:NO];
@@ -2892,7 +2900,7 @@ static YapDatabaseViewRowChange* (^RowOp)(NSArray*, NSUInteger) = ^(NSArray *rCh
 	NSArray *sectionChanges;
 	NSArray *rowChanges;
 	
-	YapDatabaseViewMappings *mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A"] view:nil];
+	YapDatabaseViewMappings *mappings = [[YapDatabaseViewMappings alloc] initWithGroups:@[@"A"] view:@""];
 	[mappings setCellDrawingDependencyForNeighboringCellWithOffset:-1 forGroup:@"A"];
 	
 	[mappings updateWithCounts:@{ @"A": @(2) } forceUpdateRangeOptions:NO];

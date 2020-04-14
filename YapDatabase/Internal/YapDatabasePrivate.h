@@ -2,24 +2,48 @@
 
 #import "YapDatabase.h"
 #import "YapDatabaseConnection.h"
-#import "YapDatabaseConnectionDefaults.h"
+#import "YapDatabaseConnectionConfig.h"
 #import "YapDatabaseTransaction.h"
 #import "YapDatabaseExtension.h"
 
+#import "YapBidirectionalCache.h"
 #import "YapCache.h"
-#import "YapMemoryTable.h"
 #import "YapCollectionKey.h"
+#import "YapDatabaseCollectionConfig.h"
+#import "YapMemoryTable.h"
+#import "YapMutationStack.h"
 
-#import "sqlite3.h"
+#ifdef SQLITE_HAS_CODEC
+  #import <SQLCipher/sqlite3.h>
+#else
+  #import "sqlite3.h"
+#endif
+#import "yap_vfs_shim.h"
+
+NS_ASSUME_NONNULL_BEGIN
 
 /**
  * Helper method to conditionally invoke sqlite3_finalize on a statement, and then set the ivar to NULL.
-**/
-NS_INLINE void sqlite_finalize_null(sqlite3_stmt **stmtPtr)
+ */
+NS_INLINE void sqlite_finalize_null(sqlite3_stmt *_Nonnull* _Nonnull stmtPtr)
 {
-	if (*stmtPtr) {
+	if (stmtPtr && *stmtPtr)
+	{
 		sqlite3_finalize(*stmtPtr);
 		*stmtPtr = NULL;
+	}
+}
+
+NS_INLINE void sqlite_enum_reset(sqlite3_stmt *stmt, BOOL needsFinalize)
+{
+	if (stmt)
+	{
+		sqlite3_clear_bindings(stmt);
+		sqlite3_reset(stmt);
+		
+		if (needsFinalize) {
+			sqlite3_finalize(stmt);
+		}
 	}
 }
 
@@ -33,7 +57,7 @@ NS_INLINE void sqlite_finalize_null(sqlite3_stmt **stmtPtr)
 
 /**
  * Keys for changeset dictionary.
-**/
+ */
 
 extern NSString *const YapDatabaseRegisteredExtensionsKey;
 extern NSString *const YapDatabaseRegisteredMemoryTablesKey;
@@ -46,12 +70,15 @@ extern NSString *const YapDatabaseNotificationKey;
  * Key(s) for yap2 extension configuration table.
  *
  * This is the only key that is reserved, and should not be set by extension subclasses.
-**/
+ */
 static NSString *const ext_key_class = @"class";
 
 
 @interface YapDatabase () {
 @public
+	
+	NSString *yap_vfs_shim_name;
+	yap_vfs *yap_vfs_shim;
 	
 	void *IsOnSnapshotQueueKey;       // Only to be used by YapDatabaseConnection
 	void *IsOnWriteQueueKey;          // Only to be used by YapDatabaseConnection
@@ -62,51 +89,48 @@ static NSString *const ext_key_class = @"class";
 	NSMutableArray *connectionStates; // Only to be used by YapDatabaseConnection
 	
 	NSArray *previouslyRegisteredExtensionNames; // Writeable only within snapshot queue
-	
-	YapDatabaseSerializer objectSerializer;         // Read-only by transactions
-	YapDatabaseDeserializer objectDeserializer;     // Read-only by transactions
-	
-	YapDatabaseSerializer metadataSerializer;       // Read-only by transactions
-	YapDatabaseDeserializer metadataDeserializer;   // Read-only by transactions
-	
-	YapDatabasePreSanitizer objectPreSanitizer;     // Read-only by transactions
-	YapDatabasePostSanitizer objectPostSanitizer;   // Read-only by transactions
-	
-	YapDatabasePreSanitizer metadataPreSanitizer;   // Read-only by transactions
-	YapDatabasePostSanitizer metadataPostSanitizer; // Read-only by transactions
 }
 
 /**
  * General utility methods.
-**/
+ */
+
 + (int64_t)pragma:(NSString *)pragmaSetting using:(sqlite3 *)aDb;
-+ (NSString *)pragmaValueForAutoVacuum:(int64_t)auto_vacuum;
+
 + (NSString *)pragmaValueForSynchronous:(int64_t)synchronous;
++ (NSString *)pragmaValueForAutoVacuum:(int64_t)auto_vacuum;
+
 
 + (BOOL)tableExists:(NSString *)tableName using:(sqlite3 *)aDb;
++ (NSArray *)tableNamesUsing:(sqlite3 *)aDb;
 + (NSArray *)columnNamesForTable:(NSString *)tableName using:(sqlite3 *)aDb;
 + (NSDictionary *)columnNamesAndAffinityForTable:(NSString *)tableName using:(sqlite3 *)aDb;
 
 /**
- * New connections inherit their default values from this structure.
-**/
-- (YapDatabaseConnectionDefaults *)connectionDefaults;
-
-/**
  * Called from YapDatabaseConnection's dealloc method to remove connection's state from connectionStates array.
-**/
+ */
 - (void)removeConnection:(YapDatabaseConnection *)connection;
 
 /**
  * YapDatabaseConnection uses these methods to recycle sqlite3 instances using the connection pool.
-**/
-- (BOOL)connectionPoolEnqueue:(sqlite3 *)aDb;
-- (sqlite3 *)connectionPoolDequeue;
+ */
+- (BOOL)connectionPoolEnqueue:(sqlite3 *)aDb main_file:(yap_file *)main_file wal_file:(yap_file *)wal_file;
+- (BOOL)connectionPoolDequeue:(sqlite3 *_Nonnull*_Nonnull)aDb main_file:(yap_file *_Nonnull*_Nonnull)main_file wal_file:(yap_file *_Nonnull*_Nonnull)wal_file;
+
+- (YapDatabaseDeserializer)objectDeserializerForCollection:(nullable NSString *)collection;
+- (YapDatabaseDeserializer)metadataDeserializerForCollection:(nullable NSString *)collection;
+
+- (YapDatabaseCollectionConfig *)configForCollection:(nullable NSString *)collection;
+
+- (NSNumber *)getDefaultObjectPolicy;
+- (NSNumber *)getDefaultMetadataPolicy;
+- (void)getObjectPolicies:(NSDictionary<NSString*, NSNumber*> *_Nonnull *_Nonnull)objectPoliciesPtr
+         metadataPolicies:(NSDictionary<NSString*, NSNumber*> *_Nonnull *_Nonnull)metadataPoliciesPtr;
 
 /**
  * These methods are only accessible from within the snapshotQueue.
  * Used by [YapDatabaseConnection prepare].
-**/
+ */
 - (NSDictionary *)registeredMemoryTables;
 - (NSArray *)extensionsOrder;
 - (NSDictionary *)extensionDependencies;
@@ -120,8 +144,8 @@ static NSString *const ext_key_class = @"class";
  * The following MUST be in the dictionary:
  *
  * - snapshot : NSNumber with the changeset's snapshot
-**/
-- (void)notePendingChanges:(NSDictionary *)changeset fromConnection:(YapDatabaseConnection *)connection;
+ */
+- (void)notePendingChangeset:(NSDictionary *)changeset fromConnection:(YapDatabaseConnection *)connection;
 
 /**
  * This method is only accessible from within the snapshotQueue.
@@ -129,9 +153,9 @@ static NSString *const ext_key_class = @"class";
  * This method is used if a transaction finds itself in a race condition.
  * That is, the transaction started before it was able to process changesets from sibling connections.
  * 
- * It should fetch the changesets needed and then process them via [connection noteCommittedChanges:].
-**/
-- (NSArray *)pendingAndCommittedChangesSince:(uint64_t)connectionSnapshot until:(uint64_t)maxSnapshot;
+ * It should fetch the changesets needed and then process them via [connection noteCommittedChangeset:].
+ */
+- (NSArray *)pendingAndCommittedChangesetsSince:(uint64_t)connectionSnapshot until:(uint64_t)maxSnapshot;
 
 /**
  * This method is only accessible from within the snapshotQueue.
@@ -142,23 +166,31 @@ static NSString *const ext_key_class = @"class";
  * The following MUST be in the dictionary:
  * 
  * - snapshot : NSNumber with the changeset's snapshot
-**/
-- (void)noteCommittedChanges:(NSDictionary *)changeset fromConnection:(YapDatabaseConnection *)connection;
+ */
+- (void)noteCommittedChangeset:(NSDictionary *)changeset fromConnection:(YapDatabaseConnection *)connection;
 
 /**
  * This method should be called whenever the maximum checkpointable snapshot is incremented.
- * That is, the state of every connection is known to the system.
- * And a snaphot cannot be checkpointed until every connection is at or past that snapshot.
- * Thus, we can know the point at which a snapshot becomes checkpointable,
+ * 
+ * A commit/snapshot cannot be checkpointed until every connection is at or past that commit/snapshot.
+ * Luckily the state of every connection is known to the system.
+ * Thus we know the point at which a commit/snapshot becomes checkpointable,
  * and we can thus optimize the checkpoint invocations such that
  * each invocation is able to checkpoint one or more commits.
-**/
+ */
 - (void)asyncCheckpoint:(uint64_t)maxCheckpointableSnapshot;
+
+/**
+ * When aggressive checkpointing is enabled (occurs automatically if the WAL grows too big),
+ * then read-write transactions will automatically start performing checkpoint operations after each commit.
+ */
+- (BOOL)aggressiveCheckpointEnabled;
+- (void)noteCheckpointWithTotalFrames:(int)totalFrameCount checkpointedFrames:(int)checkpointedFrameCount;
 
 #ifdef SQLITE_HAS_CODEC
 /**
  * Configures database encryption via SQLCipher.
- **/
+  */
 - (BOOL)configureEncryptionForDatabase:(sqlite3 *)sqlite;
 #endif
 
@@ -174,6 +206,9 @@ static NSString *const ext_key_class = @"class";
 	
 	sqlite3 *db;
 	
+	yap_file *main_file;
+	yap_file *wal_file;
+	
 	dispatch_queue_t connectionQueue;     // For YapDatabaseExtensionConnection subclasses
 	void *IsOnConnectionQueueKey;         // For YapDatabaseExtensionConnection subclasses
 	
@@ -181,30 +216,34 @@ static NSString *const ext_key_class = @"class";
 	NSDictionary *extensionDependencies;  // Read-only for YapDatabaseExtensionTransaction subclasses
 	
 	BOOL hasDiskChanges;
+	BOOL enableMultiProcessSupport;
 	
-	YapCache *keyCache;
-	YapCache *objectCache;
-	YapCache *metadataCache;
+	YapBidirectionalCache<NSNumber *, YapCollectionKey *> *keyCache;
+	YapCache<YapCollectionKey *, id> *objectCache;
+	YapCache<YapCollectionKey *, id> *metadataCache;
 	
 	NSUInteger objectCacheLimit;          // Read-only by transaction. Use as consideration of whether to add to cache.
 	NSUInteger metadataCacheLimit;        // Read-only by transaction. Use as consideration of whether to add to cache.
-	
-	YapDatabasePolicy objectPolicy;       // Read-only by transaction. Use to determine what goes in objectChanges.
-	YapDatabasePolicy metadataPolicy;     // Read-only by transaction. Use to determine what goes in metadataChanges.
 	
 	BOOL needsMarkSqlLevelSharedReadLock; // Read-only by transaction. Use as consideration of whether to invoke method.
 	
 	NSMutableDictionary *objectChanges;
 	NSMutableDictionary *metadataChanges;
+	NSMutableSet *insertedKeys;
 	NSMutableSet *removedKeys;
 	NSMutableSet *removedCollections;
 	NSMutableSet *removedRowids;
 	BOOL allKeysRemoved;
+	BOOL externallyModified;
+	
+	YapMutationStack_Bool *mutationStack;
 }
 
-- (id)initWithDatabase:(YapDatabase *)database;
+- (instancetype)initWithDatabase:(YapDatabase *)database;
+- (instancetype)initWithDatabase:(YapDatabase *)database config:(nullable YapDatabaseConnectionConfig *)config;
 
 - (sqlite3_stmt *)beginTransactionStatement;
+- (sqlite3_stmt *)beginImmediateTransactionStatement;
 - (sqlite3_stmt *)commitTransactionStatement;
 - (sqlite3_stmt *)rollbackTransactionStatement;
 
@@ -232,18 +271,22 @@ static NSString *const ext_key_class = @"class";
 - (sqlite3_stmt *)removeForRowidStatement;
 - (sqlite3_stmt *)removeCollectionStatement;
 - (sqlite3_stmt *)removeAllStatement;
-- (sqlite3_stmt *)enumerateCollectionsStatement;
-- (sqlite3_stmt *)enumerateCollectionsForKeyStatement;
-- (sqlite3_stmt *)enumerateKeysInCollectionStatement;
-- (sqlite3_stmt *)enumerateKeysInAllCollectionsStatement;
-- (sqlite3_stmt *)enumerateKeysAndMetadataInCollectionStatement;
-- (sqlite3_stmt *)enumerateKeysAndMetadataInAllCollectionsStatement;
-- (sqlite3_stmt *)enumerateKeysAndObjectsInCollectionStatement;
-- (sqlite3_stmt *)enumerateKeysAndObjectsInAllCollectionsStatement;
-- (sqlite3_stmt *)enumerateRowsInCollectionStatement;
-- (sqlite3_stmt *)enumerateRowsInAllCollectionsStatement;
+
+- (sqlite3_stmt *)enumerateCollectionsStatement:(BOOL *)needsFinalizePtr;
+- (sqlite3_stmt *)enumerateCollectionsForKeyStatement:(BOOL *)needsFinalizePtr;
+- (sqlite3_stmt *)enumerateKeysInCollectionStatement:(BOOL *)needsFinalizePtr;
+- (sqlite3_stmt *)enumerateKeysInAllCollectionsStatement:(BOOL *)needsFinalizePtr;
+- (sqlite3_stmt *)enumerateKeysAndMetadataInCollectionStatement:(BOOL *)needsFinalizePtr;
+- (sqlite3_stmt *)enumerateKeysAndMetadataInAllCollectionsStatement:(BOOL *)needsFinalizePtr;
+- (sqlite3_stmt *)enumerateKeysAndObjectsInCollectionStatement:(BOOL *)needsFinalizePtr;
+- (sqlite3_stmt *)enumerateKeysAndObjectsInAllCollectionsStatement:(BOOL *)needsFinalizePtr;
+- (sqlite3_stmt *)enumerateRowsInCollectionStatement:(BOOL *)needsFinalizePtr;
+- (sqlite3_stmt *)enumerateRowsInAllCollectionsStatement:(BOOL *)needsFinalizePtr;
 
 - (void)prepare;
+
+- (YapDatabaseConnectionConfig *)copyConfig;
+- (void)applyConfig:(YapDatabaseConnectionConfig *)config;
 
 - (NSDictionary *)extensions;
 
@@ -255,17 +298,14 @@ static NSString *const ext_key_class = @"class";
 - (BOOL)registerMemoryTable:(YapMemoryTable *)table withName:(NSString *)name;
 - (void)unregisterMemoryTableWithName:(NSString *)name;
 
-- (YapDatabaseReadTransaction *)newReadTransaction;
-- (YapDatabaseReadWriteTransaction *)newReadWriteTransaction;
-
 - (void)markSqlLevelSharedReadLockAcquired;
 
-- (void)getInternalChangeset:(NSMutableDictionary **)internalPtr externalChangeset:(NSMutableDictionary **)externalPtr;
-- (void)processChangeset:(NSDictionary *)changeset;
+- (void)getInternalChangeset:(NSMutableDictionary *_Nonnull*_Nonnull)internalPtr
+           externalChangeset:(NSMutableDictionary *_Nonnull*_Nonnull)externalPtr;
 
-- (void)noteCommittedChanges:(NSDictionary *)changeset;
+- (void)noteCommittedChangeset:(NSDictionary *)changeset;
 
-- (void)maybeResetLongLivedReadTransaction;
+- (BOOL)resetLongLivedReadTransaction;
 
 @end
 
@@ -283,8 +323,6 @@ static NSString *const ext_key_class = @"class";
 @protected
 	NSMutableDictionary *extensions;
 	
-	BOOL isMutated; // Used for "mutation during enumeration" protection
-	
 @public
 	__unsafe_unretained YapDatabaseConnection *connection;
 	
@@ -294,6 +332,7 @@ static NSString *const ext_key_class = @"class";
 - (id)initWithConnection:(YapDatabaseConnection *)connection isReadWriteTransaction:(BOOL)flag;
 
 - (void)beginTransaction;
+- (void)beginImmediateTransaction;
 - (void)preCommitReadWriteTransaction;
 - (void)commitTransaction;
 - (void)rollbackTransaction;
@@ -312,16 +351,22 @@ static NSString *const ext_key_class = @"class";
 
 - (NSException *)mutationDuringEnumerationException;
 
-- (BOOL)getRowid:(int64_t *)rowidPtr forKey:(NSString *)key inCollection:(NSString *)collection;
+- (BOOL)getRowid:(int64_t *_Nullable)rowidPtr forCollectionKey:(YapCollectionKey *)collectionKey;
+- (BOOL)getRowid:(int64_t *_Nullable)rowidPtr forKey:(NSString *)key inCollection:(NSString *)collection;
 
 - (YapCollectionKey *)collectionKeyForRowid:(int64_t)rowid;
 
-- (BOOL)getCollectionKey:(YapCollectionKey **)collectionKeyPtr object:(id *)objectPtr forRowid:(int64_t)rowid;
-- (BOOL)getCollectionKey:(YapCollectionKey **)collectionKeyPtr metadata:(id *)metadataPtr forRowid:(int64_t)rowid;
+- (BOOL)getCollectionKey:(YapCollectionKey *_Nullable*_Nullable)collectionKeyPtr
+                  object:(id _Nullable *_Nullable)objectPtr
+                forRowid:(int64_t)rowid;
 
-- (BOOL)getCollectionKey:(YapCollectionKey **)collectionKeyPtr
-				  object:(id *)objectPtr
-				metadata:(id *)metadataPtr
+- (BOOL)getCollectionKey:(YapCollectionKey *_Nullable*_Nullable)collectionKeyPtr
+                metadata:(id _Nullable *_Nullable)metadataPtr
+                forRowid:(int64_t)rowid;
+
+- (BOOL)getCollectionKey:(YapCollectionKey *_Nullable*_Nullable)collectionKeyPtr
+						object:(id _Nullable *_Nullable)objectPtr
+					 metadata:(id _Nullable *_Nullable)metadataPtr
 				forRowid:(int64_t)rowid;
 
 - (BOOL)hasRowid:(int64_t)rowid;
@@ -332,73 +377,83 @@ static NSString *const ext_key_class = @"class";
 - (id)metadataForKey:(NSString *)key inCollection:(NSString *)collection withRowid:(int64_t)rowid;
 - (id)metadataForCollectionKey:(YapCollectionKey *)cacheKey withRowid:(int64_t)rowid;
 
-- (BOOL)getObject:(id *)objectPtr
-		 metadata:(id *)metadataPtr
+- (BOOL)getObject:(id _Nullable *_Nullable)objectPtr
+			metadata:(id _Nullable *_Nullable)metadataPtr
+           forKey:(NSString *)key
+     inCollection:(NSString *)collection
+        withRowid:(int64_t)rowid;
+
+- (BOOL)getObject:(id _Nullable *_Nullable)objectPtr
+			metadata:(id _Nullable *_Nullable)metadataPtr
  forCollectionKey:(YapCollectionKey *)collectionKey
-		withRowid:(int64_t)rowid;
+        withRowid:(int64_t)rowid;
 
 - (void)_enumerateKeysInCollection:(NSString *)collection
-                        usingBlock:(void (^)(int64_t rowid, NSString *key, BOOL *stop))block;
+                        usingBlock:(void (NS_NOESCAPE^)(int64_t rowid, NSString *key, BOOL *stop))block;
 
-- (void)_enumerateKeysInCollections:(NSArray *)collections
-                         usingBlock:(void (^)(int64_t rowid, NSString *collection, NSString *key, BOOL *stop))block;
+- (void)_enumerateKeysInCollections:(NSArray<NSString*> *)collections
+                         usingBlock:(void (NS_NOESCAPE^)(int64_t rowid, NSString *collection, NSString *key, BOOL *stop))block;
 
 - (void)_enumerateKeysInAllCollectionsUsingBlock:
-                            (void (^)(int64_t rowid, NSString *collection, NSString *key, BOOL *stop))block;
+                            (void (NS_NOESCAPE^)(int64_t rowid, NSString *collection, NSString *key, BOOL *stop))block;
 
-- (void)_enumerateKeysAndMetadataInCollection:(NSString *)collection
-                                   usingBlock:(void (^)(int64_t rowid, NSString *key, id metadata, BOOL *stop))block;
-- (void)_enumerateKeysAndMetadataInCollection:(NSString *)collection
-                                   usingBlock:(void (^)(int64_t rowid, NSString *key, id metadata, BOOL *stop))block
-                                   withFilter:(BOOL (^)(int64_t rowid, NSString *key))filter;
+- (void)_enumerateKeysAndMetadataInCollection:(nullable NSString *)collection
+                           usingBlock:(void (NS_NOESCAPE^)(int64_t rowid, NSString *key, id metadata, BOOL *stop))block;
+- (void)_enumerateKeysAndMetadataInCollection:(nullable NSString *)collection
+                           usingBlock:(void (NS_NOESCAPE^)(int64_t rowid, NSString *key, id metadata, BOOL *stop))block
+                           withFilter:(nullable BOOL (NS_NOESCAPE^)(int64_t rowid, NSString *key))filter;
 
 - (void)_enumerateKeysAndMetadataInCollections:(NSArray *)collections
-                usingBlock:(void (^)(int64_t rowid, NSString *collection, NSString *key, id metadata, BOOL *stop))block;
+                usingBlock:(void (NS_NOESCAPE^)(int64_t rowid, NSString *collection, NSString *key, id metadata, BOOL *stop))block;
 - (void)_enumerateKeysAndMetadataInCollections:(NSArray *)collections
-                usingBlock:(void (^)(int64_t rowid, NSString *collection, NSString *key, id metadata, BOOL *stop))block
-                withFilter:(BOOL (^)(int64_t rowid, NSString *collection, NSString *key))filter;
+                usingBlock:(void (NS_NOESCAPE^)(int64_t rowid, NSString *collection, NSString *key, id metadata, BOOL *stop))block
+                withFilter:(nullable BOOL (NS_NOESCAPE^)(int64_t rowid, NSString *collection, NSString *key))filter;
 
 - (void)_enumerateKeysAndMetadataInAllCollectionsUsingBlock:
-                        (void (^)(int64_t rowid, NSString *collection, NSString *key, id metadata, BOOL *stop))block;
+                (void (NS_NOESCAPE^)(int64_t rowid, NSString *collection, NSString *key, id metadata, BOOL *stop))block;
 - (void)_enumerateKeysAndMetadataInAllCollectionsUsingBlock:
-                        (void (^)(int64_t rowid, NSString *collection, NSString *key, id metadata, BOOL *stop))block
-             withFilter:(BOOL (^)(int64_t rowid, NSString *collection, NSString *key))filter;
+                (void (NS_NOESCAPE^)(int64_t rowid, NSString *collection, NSString *key, id metadata, BOOL *stop))block
+     withFilter:(nullable BOOL (NS_NOESCAPE^)(int64_t rowid, NSString *collection, NSString *key))filter;
 
-- (void)_enumerateKeysAndObjectsInCollection:(NSString *)collection
-                                  usingBlock:(void (^)(int64_t rowid, NSString *key, id object, BOOL *stop))block;
-- (void)_enumerateKeysAndObjectsInCollection:(NSString *)collection
-                                  usingBlock:(void (^)(int64_t rowid, NSString *key, id object, BOOL *stop))block
-                                  withFilter:(BOOL (^)(int64_t rowid, NSString *key))filter;
+- (void)_enumerateKeysAndObjectsInCollection:(nullable NSString *)collection
+        usingBlock:(void (NS_NOESCAPE^)(int64_t rowid, NSString *key, id object, BOOL *stop))block;
+- (void)_enumerateKeysAndObjectsInCollection:(nullable NSString *)collection
+        usingBlock:(void (NS_NOESCAPE^)(int64_t rowid, NSString *key, id object, BOOL *stop))block
+        withFilter:(nullable BOOL (NS_NOESCAPE^)(int64_t rowid, NSString *key))filter;
 
-- (void)_enumerateKeysAndObjectsInCollections:(NSArray *)collections
-                 usingBlock:(void (^)(int64_t rowid, NSString *collection, NSString *key, id object, BOOL *stop))block;
-- (void)_enumerateKeysAndObjectsInCollections:(NSArray *)collections
-                 usingBlock:(void (^)(int64_t rowid, NSString *collection, NSString *key, id object, BOOL *stop))block
-                 withFilter:(BOOL (^)(int64_t rowid, NSString *collection, NSString *key))filter;
+- (void)_enumerateKeysAndObjectsInCollections:(NSArray<NSString*> *)collections
+       usingBlock:(void (NS_NOESCAPE^)(int64_t rowid, NSString *collection, NSString *key, id object, BOOL *stop))block;
+- (void)_enumerateKeysAndObjectsInCollections:(NSArray<NSString*> *)collections
+        usingBlock:(void (NS_NOESCAPE^)(int64_t rowid, NSString *collection, NSString *key, id object, BOOL *stop))block
+        withFilter:(nullable BOOL (NS_NOESCAPE^)(int64_t rowid, NSString *collection, NSString *key))filter;
 
 - (void)_enumerateKeysAndObjectsInAllCollectionsUsingBlock:
-                            (void (^)(int64_t rowid, NSString *collection, NSString *key, id object, BOOL *stop))block;
+                  (void (NS_NOESCAPE^)(int64_t rowid, NSString *collection, NSString *key, id object, BOOL *stop))block;
 - (void)_enumerateKeysAndObjectsInAllCollectionsUsingBlock:
-                            (void (^)(int64_t rowid, NSString *collection, NSString *key, id object, BOOL *stop))block
-                 withFilter:(BOOL (^)(int64_t rowid, NSString *collection, NSString *key))filter;
+                  (void (NS_NOESCAPE^)(int64_t rowid, NSString *collection, NSString *key, id object, BOOL *stop))block
+       withFilter:(nullable BOOL (NS_NOESCAPE^)(int64_t rowid, NSString *collection, NSString *key))filter;
 
-- (void)_enumerateRowsInCollection:(NSString *)collection
-                        usingBlock:(void (^)(int64_t rowid, NSString *key, id object, id metadata, BOOL *stop))block;
-- (void)_enumerateRowsInCollection:(NSString *)collection
-                        usingBlock:(void (^)(int64_t rowid, NSString *key, id object, id metadata, BOOL *stop))block
-                        withFilter:(BOOL (^)(int64_t rowid, NSString *key))filter;
+- (void)_enumerateRowsInCollection:(nullable NSString *)collection
+                usingBlock:(void (NS_NOESCAPE^)(int64_t rowid, NSString *key, id object, id metadata, BOOL *stop))block;
+- (void)_enumerateRowsInCollection:(nullable NSString *)collection
+                usingBlock:(void (NS_NOESCAPE^)(int64_t rowid, NSString *key, id object, id metadata, BOOL *stop))block
+                withFilter:(nullable BOOL (NS_NOESCAPE^)(int64_t rowid, NSString *key))filter;
 
-- (void)_enumerateRowsInCollections:(NSArray *)collections
-     usingBlock:(void (^)(int64_t rowid, NSString *collection, NSString *key, id object, id metadata, BOOL *stop))block;
-- (void)_enumerateRowsInCollections:(NSArray *)collections
-     usingBlock:(void (^)(int64_t rowid, NSString *collection, NSString *key, id object, id metadata, BOOL *stop))block
-     withFilter:(BOOL (^)(int64_t rowid, NSString *collection, NSString *key))filter;
+- (void)_enumerateRowsInCollections:(NSArray<NSString*> *)collections
+     usingBlock:(void (NS_NOESCAPE^)(int64_t rowid, NSString *collection, NSString *key, id object, id metadata, BOOL *stop))block;
+- (void)_enumerateRowsInCollections:(NSArray<NSString*> *)collections
+     usingBlock:(void (NS_NOESCAPE^)(int64_t rowid, NSString *collection, NSString *key, id object, id metadata, BOOL *stop))block
+     withFilter:(nullable BOOL (NS_NOESCAPE^)(int64_t rowid, NSString *collection, NSString *key))filter;
 
 - (void)_enumerateRowsInAllCollectionsUsingBlock:
-                (void (^)(int64_t rowid, NSString *collection, NSString *key, id object, id metadata, BOOL *stop))block;
+     (void (NS_NOESCAPE^)(int64_t rowid, NSString *collection, NSString *key, id object, id metadata, BOOL *stop))block;
 - (void)_enumerateRowsInAllCollectionsUsingBlock:
-                (void (^)(int64_t rowid, NSString *collection, NSString *key, id object, id metadata, BOOL *stop))block
-     withFilter:(BOOL (^)(int64_t rowid, NSString *collection, NSString *key))filter;
+     (void (NS_NOESCAPE^)(int64_t rowid, NSString *collection, NSString *key, id object, id metadata, BOOL *stop))block
+  withFilter:(nullable BOOL (NS_NOESCAPE^)(int64_t rowid, NSString *collection, NSString *key))filter;
+
+- (void)_enumerateRowidsForKeys:(NSArray<NSString*> *)keys
+                   inCollection:(NSString *)collection
+            unorderedUsingBlock:(void (NS_NOESCAPE^)(NSUInteger keyIndex, int64_t rowid, BOOL *stop))block;
 
 @end
 
@@ -408,22 +463,26 @@ static NSString *const ext_key_class = @"class";
 
 @interface YapDatabaseReadWriteTransaction () {
 @public
+	NSMutableArray<dispatch_queue_t> *completionQueueStack;
+	NSMutableArray<dispatch_block_t> *completionBlockStack;
+	
 	BOOL rollback;
 	id customObjectForNotification;
 }
 
 - (void)replaceObject:(id)object
                forKey:(NSString *)key
-         inCollection:(NSString *)collection
+         inCollection:(nullable NSString *)collection
             withRowid:(int64_t)rowid
-     serializedObject:(NSData *)preSerializedObject;
+     serializedObject:(nullable NSData *)preSerializedObject;
 
 - (void)replaceMetadata:(id)metadata
                  forKey:(NSString *)key
-           inCollection:(NSString *)collection
+           inCollection:(nullable NSString *)collection
               withRowid:(int64_t)rowid
-     serializedMetadata:(NSData *)preSerializedMetadata;
+     serializedMetadata:(nullable NSData *)preSerializedMetadata;
 
+- (void)removeObjectForCollectionKey:(YapCollectionKey *)collectionKey withRowid:(int64_t)rowid;
 - (void)removeObjectForKey:(NSString *)key inCollection:(NSString *)collection withRowid:(int64_t)rowid;
 
 - (void)addRegisteredExtensionTransaction:(YapDatabaseExtensionTransaction *)extTrnsactn withName:(NSString *)extName;
@@ -439,3 +498,5 @@ static NSString *const ext_key_class = @"class";
 - (void)removeAllValuesForExtension:(NSString *)extensionName;
 
 @end
+
+NS_ASSUME_NONNULL_END

@@ -3,12 +3,13 @@
 
 @class YapDatabaseSecondaryIndex;
 
+NS_ASSUME_NONNULL_BEGIN
 
 @interface YapDatabaseSecondaryIndexConnection : YapDatabaseExtensionConnection
 
 /**
  * Returns the parent instance.
-**/
+ */
 @property (nonatomic, strong, readonly) YapDatabaseSecondaryIndex *secondaryIndex;
 
 /**
@@ -26,8 +27,10 @@
  *
  * To disable the cache entirely, set queryCacheEnabled to NO.
  * To use an inifinite cache size, set the queryCacheLimit to ZERO.
-**/
+ */
 @property (atomic, assign, readwrite) BOOL queryCacheEnabled;
 @property (atomic, assign, readwrite) NSUInteger queryCacheLimit;
 
 @end
+
+NS_ASSUME_NONNULL_END

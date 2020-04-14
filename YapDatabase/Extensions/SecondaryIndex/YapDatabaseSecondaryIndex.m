@@ -15,9 +15,9 @@
  * See YapDatabaseLogging.h for more information.
  **/
 #if DEBUG
-  static const int ydbLogLevel = YDB_LOG_LEVEL_WARN;
+  static const int ydbLogLevel = YDBLogLevelWarning;
 #else
-  static const int ydbLogLevel = YDB_LOG_LEVEL_WARN;
+  static const int ydbLogLevel = YDBLogLevelWarning;
 #endif
 #pragma unused(ydbLogLevel)
 
@@ -36,8 +36,7 @@
 	int status = sqlite3_exec(db, [dropTable UTF8String], NULL, NULL, NULL);
 	if (status != SQLITE_OK)
 	{
-		YDBLogError(@"%@ - Failed dropping table (%@): %d %s",
-		            THIS_METHOD, tableName, status, sqlite3_errmsg(db));
+		YDBLogError(@"Failed dropping table (%@): %d %s", tableName, status, sqlite3_errmsg(db));
 	}
 }
 
@@ -87,7 +86,7 @@
 	{
 		NSAssert(NO, @"Invalid setup: nil");
 		
-		YDBLogError(@"%@: Invalid setup: nil", THIS_METHOD);
+		YDBLogError(@"Invalid setup: nil");
 		return nil;
 	}
 	
@@ -95,7 +94,7 @@
 	{
 		NSAssert(NO, @"Invalid setup: empty");
 		
-		YDBLogError(@"%@: Invalid setup: empty", THIS_METHOD);
+		YDBLogError(@"Invalid setup: empty");
 		return nil;
 	}
 	
@@ -103,7 +102,7 @@
 	{
 		NSAssert(NO, @"Invalid handler: NULL");
 		
-		YDBLogError(@"%@: Invalid handler: NULL", THIS_METHOD);
+		YDBLogError(@"Invalid handler: NULL");
 		return nil;
 	}
 	
@@ -112,9 +111,7 @@
 	if ((self = [super init]))
 	{
 		setup = [inSetup copy];
-		
-		block = inHandler.block;
-		blockType = inHandler.blockType;
+		handler = inHandler;
 		
 		columnNamesSharedKeySet = [NSDictionary sharedKeySetForKeys:[setup columnNames]];
 		
@@ -127,9 +124,7 @@
 
 - (YapDatabaseExtensionConnection *)newConnection:(YapDatabaseConnection *)databaseConnection
 {
-	return [[YapDatabaseSecondaryIndexConnection alloc]
-	           initWithSecondaryIndex:self
-	               databaseConnection:databaseConnection];
+	return [[YapDatabaseSecondaryIndexConnection alloc] initWithParent:self databaseConnection:databaseConnection];
 }
 
 - (NSString *)tableName

@@ -13,7 +13,7 @@
  * 
  * This information is used to create and track the NSOperation's that are pushing data to the cloud,
  * as well as the corresponding information that we need to save to persistent storage.
-**/
+ */
 - (instancetype)initMasterQueue;
 
 #pragma mark Lifecycle
@@ -23,25 +23,25 @@
  * after the old changeSets, from previous app run(s), have been restored.
  * 
  * This method MUST be called from within the readWriteTransaction that registers the extension.
-**/
+ */
 - (void)restoreOldChangeSets:(NSArray *)oldChangeSets;
 
 /**
  * If there is NOT already an in-flight changeSet, then this method sets the appropriate flag(s),
  * and returns the next changeSet ready for upload.
-**/
+ */
 - (YDBCKChangeSet *)makeInFlightChangeSet:(BOOL *)isAlreadyInFlightPtr;
 
 /**
  * If there is an in-flight changeSet,
  * then this method removes it to make room for new in-flight changeSets.
-**/
+ */
 - (void)removeCompletedInFlightChangeSet;
 
 /**
  * If there is an in-flight changeSet,
  * then this method "resets" it so it can be restarted again (when ready).
-**/
+ */
 - (void)resetFailedInFlightChangeSet;
 
 /**
@@ -54,7 +54,7 @@
  *
  * Keep in mind that the creation of a pendingQueue locks the masterQueue until
  * that pendingQueue is merged via mergePendingQueue.
-**/
+ */
 - (YDBCKChangeQueue *)newPendingQueue;
 
 /**
@@ -65,7 +65,7 @@
  * 
  * Keep in mind that the creation of a pendingQueue locks the masterQueue until
  * that pendingQueue is merged via mergePendingQueue.
-**/
+ */
 - (void)mergePendingQueue:(YDBCKChangeQueue *)pendingQueue;
 
 #pragma mark Properties
@@ -73,7 +73,7 @@
 /**
  * Determining queue type.
  * Primarily used for sanity checks.
-**/
+ */
 @property (nonatomic, readonly) BOOL isMasterQueue;
 @property (nonatomic, readonly) BOOL isPendingQueue;
 
@@ -84,8 +84,16 @@
  * which is either the inFlightChangeSet, or the next changeSet to go inFlight once resumed.
  *
  * In other words, the first YDBCKChangeSet in the queue.
-**/
+ */
 - (NSString *)currentChangeSetUUID;
+
+/**
+ * Returns the "current" changeSet,
+ * which is either the inFlightChangeSet, or the next changeSet to go inFlight once resumed.
+ * 
+ * In other words, the first YDBCKChangeSet in the queue.
+ */
+- (YDBCKChangeSet *)currentChangeSet;
 
 /**
  * Each commit that makes one or more changes to a CKRecord (insert/modify/delete)
@@ -94,7 +102,7 @@
  * So a single commit may possibly generate multiple changeSets.
  *
  * Thus a changeSet encompasses all the relavent CloudKit related changes per database, per commit.
-**/
+ */
 - (NSArray *)changeSetsFromPreviousCommits;
 - (NSArray *)changeSetsFromCurrentCommit;
 
@@ -117,14 +125,14 @@
  * numberOfInFlightChangeSets == numberOfPendingChangeSets - numberOfQueuedChangeSets
  * numberOfQueuedChangeSets   == numberOfPendingChangeSets - numberOfInFlightChangeSets
  * numberOfPendingChangeSets  == numberOfPendingChangeSets + numberOfQueuedChangeSets
-**/
+ */
 @property (atomic, readonly) NSUInteger numberOfInFlightChangeSets;
 @property (atomic, readonly) NSUInteger numberOfQueuedChangeSets;
 @property (atomic, readonly) NSUInteger numberOfPendingChangeSets;
 
 /**
  * Atomic access to all counts at once.
-**/
+ */
 - (void)getNumberOfInFlightChangeSets:(NSUInteger *)numInFlightChangeSetsPtr
                      queuedChangeSets:(NSUInteger *)numQueuedChangeSetsPtr;
 
@@ -132,7 +140,7 @@
 
 /**
  * Check in pendingChangeSetsFromPreviousCommits to see what kind of changes are pending.
-**/
+ */
 - (void)getHasPendingModification:(BOOL *)outHasPendingModification
                  hasPendingDelete:(BOOL *)outHasPendingDelete
                       forRecordID:(CKRecordID *)recordID
@@ -147,7 +155,7 @@
  * The given record is expected to be a sanitized record.
  * 
  * Returns YES if there are any pending records in the pendingChangeSetsFromPreviousCommits.
-**/
+ */
 - (BOOL)mergeChangesForRecordID:(CKRecordID *)recordID
              databaseIdentifier:(NSString *)databaseIdentifier
                            into:(YDBCKMergeInfo *)mergeInfo;
@@ -161,7 +169,7 @@
  * 
  * The following may be modified:
  * - pendingQueue.changeSetsFromCurrentCommit
-**/
+ */
 - (void)updatePendingQueue:(YDBCKChangeQueue *)pendingQueue
         withInsertedRecord:(CKRecord *)record
         databaseIdentifier:(NSString *)databaseIdentifier;
@@ -175,7 +183,7 @@
  * The following may be modified:
  * - pendingQueue.changeSetsFromPreviousCommits
  * - pendingQueue.changeSetsFromCurrentCommit
-**/
+ */
 - (void)updatePendingQueue:(YDBCKChangeQueue *)pendingQueue
         withModifiedRecord:(CKRecord *)record
         databaseIdentifier:(NSString *)databaseIdentifier
@@ -187,7 +195,7 @@
  *
  * The following may be modified:
  * - pendingQueue.changeSetsFromPreviousCommits
-**/
+ */
 - (void)updatePendingQueue:(YDBCKChangeQueue *)pendingQueue
       withDetachedRecordID:(CKRecordID *)recordID
         databaseIdentifier:(NSString *)databaseIdentifier;
@@ -201,7 +209,7 @@
  * The following may be modified:
  * - pendingQueue.changeSetsFromPreviousCommits
  * - pendingQueue.changeSetsFromCurrentCommit
-**/
+ */
 - (void)updatePendingQueue:(YDBCKChangeQueue *)pendingQueue
        withDeletedRecordID:(CKRecordID *)recordID
         databaseIdentifier:(NSString *)databaseIdentifier;
@@ -217,7 +225,7 @@
  * The following may be modified:
  * - pendingQueue.changeSetsFromPreviousCommits
  * - pendingQueue.changeSetsFromCurrentCommit
-**/
+ */
 - (void)updatePendingQueue:(YDBCKChangeQueue *)pendingQueue
           withMergedRecord:(CKRecord *)mergedRecord
         databaseIdentifier:(NSString *)databaseIdentifier;
@@ -228,7 +236,7 @@
  *
  * The following may be modified:
  * - pendingQueue.changeSetsFromPreviousCommits
-**/
+ */
 - (void)updatePendingQueue:(YDBCKChangeQueue *)pendingQueue
  withRemoteDeletedRecordID:(CKRecordID *)recordID
         databaseIdentifier:(NSString *)databaseIdentifier;
@@ -241,7 +249,7 @@
  * 
  * The following may be modified:
  * - pendingQueue.changeSetsFromPreviousCommits
-**/
+ */
 - (void)updatePendingQueue:(YDBCKChangeQueue *)pendingQueue
            withSavedRecord:(CKRecord *)record
         databaseIdentifier:(NSString *)databaseIdentifier
@@ -253,7 +261,7 @@
  * 
  * The following may be modified:
  * - pendingQueue.changeSetsFromPreviousCommits
-**/
+ */
 - (void)updatePendingQueue:(YDBCKChangeQueue *)pendingQueue
   withSavedDeletedRecordID:(CKRecordID *)recordID
         databaseIdentifier:(NSString *)databaseIdentifier;

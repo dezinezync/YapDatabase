@@ -1,8 +1,10 @@
 #import <Foundation/Foundation.h>
 
-#ifndef YAP_CACHE_STATISTICS
-#define YAP_CACHE_STATISTICS 0
+#ifndef YapCache_Enable_Statistics
+  #define YapCache_Enable_Statistics 0
 #endif
+
+NS_ASSUME_NONNULL_BEGIN
 
 /**
  * YapCache implements a simple strict cache.
@@ -33,14 +35,13 @@
  * This also has to do with YapCache not being thread-safe.
  * And thus performing this action (if desired) is up to you.
  * The various YapDatabase classes which use it do this themselves.
-**/
-
-@interface YapCache : NSObject
+ */
+@interface YapCache<KeyType, ObjectType> : NSObject
 
 /**
  * Initializes a cache.
  * If you don't define a countLimit, then the default countLimit of 40 is used.
-**/
+ */
 - (instancetype)init;
 - (instancetype)initWithCountLimit:(NSUInteger)countLimit;
 
@@ -67,7 +68,7 @@
  * Various classes within YapDatabase, which use YapCache, use a YapCollectionKey object as the key.
  * And the YapCollectionKey class actually provides its own CFDictionaryKeyCallBacks struct that provides
  * a nice little performance boost.
-**/
+ */
 - (instancetype)initWithCountLimit:(NSUInteger)countLimit keyCallbacks:(CFDictionaryKeyCallBacks)keyCallbacks;
 
 /**
@@ -81,7 +82,7 @@
  * You may change the countLimit at any time.
  * Changes to the countLimit take immediate effect on the cache (before the set method returns).
  * Thus, if needed, you can temporarily increase the cache size for certain operations.
-**/
+ */
 @property (nonatomic, assign, readwrite) NSUInteger countLimit;
 
 /**
@@ -96,39 +97,39 @@
  * Since this is for debugging, the checks are ONLY run when assertions are enabled.
  * In general, assertions are disabled when you compile for release.
  * But to be precise, the checks are only run if NS_BLOCK_ASSERTIONS is not defined.
-**/
-@property (nonatomic, copy, readwrite) NSSet *allowedKeyClasses;
-@property (nonatomic, copy, readwrite) NSSet *allowedObjectClasses;
+ */
+@property (nonatomic, copy, readwrite, nullable) NSSet<Class> *allowedKeyClasses;
+@property (nonatomic, copy, readwrite, nullable) NSSet<Class> *allowedObjectClasses;
 
 //
 // The normal cache stuff...
 //
 
-- (void)setObject:(id)object forKey:(id)key;
+- (void)setObject:(ObjectType)object forKey:(KeyType)key;
 
-- (id)objectForKey:(id)key;
-- (BOOL)containsKey:(id)key;
+- (nullable ObjectType)objectForKey:(KeyType)key;
+- (BOOL)containsKey:(KeyType)key;
 
 - (NSUInteger)count;
 
 - (void)removeAllObjects;
-- (void)removeObjectForKey:(id)key;
-- (void)removeObjectsForKeys:(NSArray *)keys;
+- (void)removeObjectForKey:(KeyType)key;
+- (void)removeObjectsForKeys:(id <NSFastEnumeration>)keys;
 
-- (void)enumerateKeysWithBlock:(void (^)(id key, BOOL *stop))block;
-- (void)enumerateKeysAndObjectsWithBlock:(void (^)(id key, id obj, BOOL *stop))block;
+- (void)enumerateKeysWithBlock:(void (NS_NOESCAPE^)(KeyType key, BOOL *stop))block;
+- (void)enumerateKeysAndObjectsWithBlock:(void (NS_NOESCAPE^)(KeyType key, ObjectType obj, BOOL *stop))block;
 
 //
 // Some debugging stuff that gets compiled out
 //
 
-#if YAP_CACHE_STATISTICS
+#if YapCache_Enable_Statistics
 
 /**
  * When querying the cache for an object via objectForKey,
  * the hitCount is incremented if the object is in the cache,
  * and the missCount is incremented if the object is not in the cache.
-**/
+ */
 @property (nonatomic, readonly) NSUInteger hitCount;
 @property (nonatomic, readonly) NSUInteger missCount;
 
@@ -136,9 +137,11 @@
  * When adding objects to the cache via setObject:forKey:,
  * the evictionCount is incremented if the cache is full,
  * and the added object causes another object (the least recently used object) to be evicted.
-**/
+ */
 @property (nonatomic, readonly) NSUInteger evictionCount;
 
 #endif
 
 @end
+
+NS_ASSUME_NONNULL_END

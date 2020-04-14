@@ -1,5 +1,7 @@
 #import <Foundation/Foundation.h>
 
+NS_ASSUME_NONNULL_BEGIN
+
 /**
  * The YapSet class can be treated more or less like a regular NSSet.
  *
@@ -12,7 +14,7 @@
  * 
  * @see YapDatabaseConnection hasChangeForKey:inNotifications:
  * @see YapDatabaseConnection hasChangeForAnyKeys:inNotifications:
-**/
+ */
 @interface YapSet : NSObject <NSFastEnumeration>
 
 - (id)initWithSet:(NSMutableSet *)set;
@@ -20,10 +22,12 @@
 
 // NSSet methods
 
+@property (nonatomic, readonly) NSUInteger count;
+
 - (BOOL)containsObject:(id)anObject;
 - (BOOL)intersectsSet:(NSSet *)otherSet;
 
-- (void)enumerateObjectsUsingBlock:(void (^)(id obj, BOOL *stop))block;
+- (void)enumerateObjectsUsingBlock:(void (NS_NOESCAPE^)(id obj, BOOL *stop))block;
 
 // It's open source!
 // You are encouraged to add any methods you may need that are available in the NSSet API.
@@ -39,3 +43,5 @@
 // https://github.com/yapstudios/YapDatabase
 
 @end
+
+NS_ASSUME_NONNULL_END

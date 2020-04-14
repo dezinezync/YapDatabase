@@ -70,6 +70,13 @@
 	});
 }
 
+- (void)viewWillAppear:(BOOL)animated
+{
+	[super viewWillAppear:animated];
+	
+	[titleView becomeFirstResponder];
+}
+
 - (void)setTodoID:(NSString *)newTodoID
 {
 	todoID = newTodoID;
@@ -188,14 +195,15 @@
 		newPriority = TodoPriorityHigh;
 	else
 		newPriority = TodoPriorityNormal;
-	
+
+  NSString *uuidLabelText = uuidLabel.text;
 	[MyDatabaseManager.bgDatabaseConnection asyncReadWriteWithBlock:^(YapDatabaseReadWriteTransaction *transaction) {
 		
 		MyTodo *todo = [transaction objectForKey:todoID inCollection:Collection_Todos];
 		
 		if (todo == nil)
 		{
-			todo = [[MyTodo alloc] initWithUUID:uuidLabel.text];
+			todo = [[MyTodo alloc] initWithUUID:uuidLabelText];
 			
 			todo.title = newTitle;
 			todo.isDone = newIsDone;

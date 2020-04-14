@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 
+NS_ASSUME_NONNULL_BEGIN
 
 /**
  * This utility class is used by the YapDatabaseCloudKitRecordBlock.
@@ -16,7 +17,7 @@
  * 
  *   - keysToRestore
  *   - versionInfo
-**/
+ */
 @interface YDBCKRecordInfo : NSObject
 
 /**
@@ -35,8 +36,8 @@
  *   If you specify a databaseIdentifier here,
  *   then you MUST also configure the YapDatabaseCloudKit instance with a databaseIdentifier block.
  *   Failure to do so will result in an exception.
-**/
-@property (nonatomic, copy, readwrite) NSString *databaseIdentifier;
+ */
+@property (nonatomic, copy, readwrite, nullable) NSString *databaseIdentifier;
 
 /**
  * If you make changes to the CKRecord, you can optionally choose to store the original key/value pairs.
@@ -44,8 +45,8 @@
  *
  * This dictionary will be stored alongside the modified CKRecord within the queue.
  * And will be made available during merge operations via YDBCKMergeInfo.originalValues.
-**/
-@property (nonatomic, strong, readwrite) NSDictionary *originalValues;
+ */
+@property (nonatomic, strong, readwrite, nullable) NSDictionary<NSString *, id> *originalValues;
 
 /**
  * When this property is non-nil, the recordHandler MUST restore the specified keys.
@@ -57,8 +58,8 @@
  * then YapDatabaseCloudKit will need to restore some CKRecords, and may need to restore certain values.
  *
  * You MUST check for this property within your recordHandler implementation.
-**/
-@property (nonatomic, strong, readonly) NSArray *keysToRestore;
+ */
+@property (nonatomic, strong, readonly, nullable) NSArray<NSString *> *keysToRestore;
 
 /**
  * This property comes directly from the [YapDatabaseCloudKit init...] method.
@@ -82,7 +83,9 @@
  * from the init method. Thus the recordHandler can discern between the initial population/repopulation,
  * and a normal user-initiated readWriteTransaction that's modifying an object in the database.
  * And it can then use the versionInfo to create the proper CKRecord.
-**/
+ */
 @property (nonatomic, strong, readonly) id versionInfo;
 
 @end
+
+NS_ASSUME_NONNULL_END

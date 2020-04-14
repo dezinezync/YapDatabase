@@ -1,14 +1,14 @@
 #import "AppDelegate.h"
 #import "Person.h"
 
-#import "DDLog.h"
-#import "DDTTYLogger.h"
+#import <CocoaLumberjack/CocoaLumberjack.h>
+#import <CocoaLumberjack/DDTTYLogger.h>
 
 // Per-file log level for CocoaLumbejack (logging framework)
 #if DEBUG
-  static const int ddLogLevel = LOG_LEVEL_VERBOSE;
+  static const int ddLogLevel = DDLogLevelVerbose;
 #else
-  static const int ddLogLevel = LOG_LEVEL_WARN;
+  static const int ddLogLevel = DDLogLevelWarn;
 #endif
 
 AppDelegate *TheAppDelegate;
@@ -46,7 +46,7 @@ AppDelegate *TheAppDelegate;
 	// Fill the database with our sample names (if needed)
 	[self asyncPopulateDatabaseIfNeeded];
 	
-    return YES;
+	return YES;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -67,7 +67,8 @@ AppDelegate *TheAppDelegate;
 {
 	NSString *databasePath = [self databasePath];
 	
-	[[NSFileManager defaultManager] removeItemAtPath:databasePath error:NULL];
+	// Delete the previous database on next launch (force create new database)
+//	[[NSFileManager defaultManager] removeItemAtPath:databasePath error:NULL];
 	
 	// Create the database.
 	// We do this using the default settings.
@@ -84,7 +85,9 @@ AppDelegate *TheAppDelegate;
 	
 	DDLogVerbose(@"Creating view...");
 
-    YapDatabaseViewGrouping *grouping = [YapDatabaseViewGrouping withKeyBlock:^NSString *(NSString *collection, NSString *key) {
+	YapDatabaseViewGrouping *grouping = [YapDatabaseViewGrouping withKeyBlock:
+	    ^NSString *(YapDatabaseReadTransaction *transaction, NSString *collection, NSString *key)
+	{
         // The grouping block is used to:
         // - filter items that we don't want in the view
         // - place items into specific groups (which can be used as sections in a tableView, for example)
@@ -95,10 +98,12 @@ AppDelegate *TheAppDelegate;
         return @"all";
     }];
 
-    YapDatabaseViewSorting *sorting = [YapDatabaseViewSorting withObjectBlock:^NSComparisonResult(NSString *group,
-            NSString *collection1, NSString *key1, id object1,
-            NSString *collection2, NSString *key2, id object2) {
-        // The sorting block is used to sort items within their group/section.
+	YapDatabaseViewSorting *sorting = [YapDatabaseViewSorting withObjectBlock:
+	    ^NSComparisonResult(YapDatabaseReadTransaction *transaction, NSString *group,
+	                        NSString *collection1, NSString *key1, id object1,
+	                        NSString *collection2, NSString *key2, id object2)
+	{
+		// The sorting block is used to sort items within their group/section.
 
         __unsafe_unretained Person *person1 = (Person *)object1;
         __unsafe_unretained Person *person2 = (Person *)object2;
@@ -106,10 +111,11 @@ AppDelegate *TheAppDelegate;
         return [person1.name compare:person2.name options:NSLiteralSearch];
     }];
 
-	YapDatabaseView *view = [[YapDatabaseView alloc] initWithGrouping:grouping
-                                                              sorting:sorting
-                                                           versionTag:@"1"
-                                                              options:nil];
+	YapDatabaseAutoView *view =
+	  [[YapDatabaseAutoView alloc] initWithGrouping:grouping
+	                                        sorting:sorting
+	                                     versionTag:@"1"
+	                                        options:nil];
 	
 	if (![database registerExtension:view withName:@"order"])
 	{
@@ -126,13 +132,18 @@ AppDelegate *TheAppDelegate;
 	
 	DDLogVerbose(@"Creating fts...");
 
-    YapDatabaseFullTextSearchHandler *handler = [YapDatabaseFullTextSearchHandler withObjectBlock:^(NSMutableDictionary *dict, NSString *collection, NSString *key, id object) {
-        __unsafe_unretained Person *person = (Person *)object;
-        dict[@"name"] = person.name;
-    }];
+	YapDatabaseFullTextSearchHandler *handler = [YapDatabaseFullTextSearchHandler withObjectBlock:
+		^(NSMutableDictionary *dict, NSString *collection, NSString *key, id object)
+	{
+		__unsafe_unretained Person *person = (Person *)object;
+		
+		dict[@"name"] = person.name;
+	}];
 
-	YapDatabaseFullTextSearch *fts = [[YapDatabaseFullTextSearch alloc] initWithColumnNames:@[ @"name" ] handler:handler versionTag:@"1"];
-
+	YapDatabaseFullTextSearch *fts =
+	  [[YapDatabaseFullTextSearch alloc] initWithColumnNames:@[ @"name" ]
+	                                                 handler:handler
+	                                              versionTag:@"1"];
 	
 	if (![database registerExtension:fts withName:@"fts"])
 	{
@@ -153,10 +164,11 @@ AppDelegate *TheAppDelegate;
 	YapDatabaseSearchResultsViewOptions *searchViewOptions = [[YapDatabaseSearchResultsViewOptions alloc] init];
 	searchViewOptions.isPersistent = NO;
 	
-	YapDatabaseSearchResultsView *searchResultsView = [[YapDatabaseSearchResultsView alloc] initWithFullTextSearchName:@"fts"
+	YapDatabaseSearchResultsView *searchResultsView =
+	  [[YapDatabaseSearchResultsView alloc] initWithFullTextSearchName:@"fts"
 	                                                    parentViewName:@"order"
 	                                                        versionTag:@"1"
-	                                                      options:searchViewOptions];
+	                                                           options:searchViewOptions];
 	
 	if (![database registerExtension:searchResultsView withName:@"searchResults"])
 	{
@@ -166,13 +178,19 @@ AppDelegate *TheAppDelegate;
 
 - (void)asyncPopulateDatabaseIfNeeded
 {
-	[[database newConnection] asyncReadWriteWithBlock:^(YapDatabaseReadWriteTransaction *transaction) {
+	YapDatabaseConnection *databaseConnection = [database newConnection];
+	
+	__block NSUInteger count = 0;
+	[databaseConnection asyncReadWithBlock:^(YapDatabaseReadTransaction *transaction) {
 		
-		NSUInteger count = [transaction numberOfKeysInAllCollections];
-		if (count > 0)
-		{
+		count = [transaction numberOfKeysInAllCollections];
+		
+	} completionQueue:dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0)
+	  completionBlock:^{ @autoreleasepool {
+		
+		if (count > 0) {
 			// Looks like the database is already populated.
-			return; // from block
+			return;
 		}
 		
 		DDLogVerbose(@"Loading sample names from JSON file...");
@@ -184,27 +202,30 @@ AppDelegate *TheAppDelegate;
 		
 		NSArray *people = [NSJSONSerialization JSONObjectWithStream:inputStream options:0 error:nil];
 		
-		DDLogVerbose(@"Adding sample items to database...");
-		
-		// Bump the objectCacheLimit for a little performance boost.
-		// https://github.com/yaptv/YapDatabase/wiki/Performance-Pro
-		NSUInteger originalObjectCacheLimit = transaction.connection.objectCacheLimit;
-		transaction.connection.objectCacheLimit = [people count];
-		
-		[people enumerateObjectsUsingBlock:^(NSDictionary *info, NSUInteger idx, BOOL *stop) {
-            
-			NSString *name = info[@"name"];
-			NSString *uuid = info[@"udid"];
+		[databaseConnection asyncReadWriteWithBlock:^(YapDatabaseReadWriteTransaction *transaction) {
 			
-			Person *person = [[Person alloc] initWithName:name uuid:uuid];
+			DDLogVerbose(@"Adding sample items to database...");
 			
-			[transaction setObject:person forKey:person.uuid inCollection:@"people"];
+			// Bump the objectCacheLimit for a little performance boost.
+			// https://github.com/yaptv/YapDatabase/wiki/Performance-Pro
+			NSUInteger originalObjectCacheLimit = transaction.connection.objectCacheLimit;
+			transaction.connection.objectCacheLimit = [people count];
+			
+			[people enumerateObjectsUsingBlock:^(NSDictionary *info, NSUInteger idx, BOOL *stop) {
+				
+				NSString *name = info[@"name"];
+				NSString *uuid = info[@"udid"];
+				
+				Person *person = [[Person alloc] initWithName:name uuid:uuid];
+				
+				[transaction setObject:person forKey:person.uuid inCollection:@"people"];
+			}];
+			
+			transaction.connection.objectCacheLimit = originalObjectCacheLimit;
+			
+			DDLogVerbose(@"Committing transaction...");
 		}];
-		
-		transaction.connection.objectCacheLimit = originalObjectCacheLimit;
-		
-		DDLogVerbose(@"Committing transaction...");
-	}];
+	}}];
 }
 
 @end

@@ -1,5 +1,10 @@
 #import <Foundation/Foundation.h>
 
+@class CKRecordID;
+@class CKRecord;
+
+NS_ASSUME_NONNULL_BEGIN
+
 /**
  * A change-set represents the set of changes that will be given to a CKModifyRecordsOperation.
  *
@@ -11,7 +16,7 @@
  * then the transaction will result in multiple generated change-sets.
  *
  * You are free to inspect the change-set, however, it is not possible to modify it.
-**/
+ */
 @interface YDBCKChangeSet : NSObject
 
 @property (nonatomic, readonly) NSString *databaseIdentifier;
@@ -19,11 +24,13 @@
 
 @property (nonatomic, readonly) BOOL isInFlight;
 
-@property (nonatomic, readonly) NSArray *recordIDsToDelete; // Array of CKRecordID's for CKModifyRecordsOperation
-@property (nonatomic, readonly) NSArray *recordsToSave;     // Array of CKRecord's for CKModifyRecordsOperation
-@property (nonatomic, readonly) NSArray *recordIDsToSave;   // Array of CKRecordID's (from recordsToSave)
+@property (nonatomic, readonly) NSArray<CKRecordID *> *recordIDsToDelete; // Array of CKRecordID's for CKModifyRecordsOperation
+@property (nonatomic, readonly) NSArray<CKRecord *> *recordsToSave;     // Array of CKRecord's for CKModifyRecordsOperation
+@property (nonatomic, readonly) NSArray<CKRecordID *> *recordIDsToSave;   // Array of CKRecordID's (from recordsToSave)
 
 @property (nonatomic, readonly) NSUInteger recordIDsToDeleteCount; // shortcut if you just want the count
 @property (nonatomic, readonly) NSUInteger recordsToSaveCount;     // shortcut if you just want the count
 
 @end
+
+NS_ASSUME_NONNULL_END

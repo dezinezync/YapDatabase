@@ -1,5 +1,7 @@
 #import <Foundation/Foundation.h>
 
+NS_ASSUME_NONNULL_BEGIN
+
 /**
  * Welcome to YapDatabase!
  *
@@ -11,7 +13,7 @@
  * 
  * This class provides extra configuration options that may be passed to YapDatabase.
  * The configuration options provided by this class are advanced (beyond the basic setup options).
-**/
+ */
 
 typedef NS_ENUM(NSInteger, YapDatabaseCorruptAction) {
     YapDatabaseCorruptAction_Fail   = 0,
@@ -26,7 +28,13 @@ typedef NS_ENUM(NSInteger, YapDatabasePragmaSynchronous) {
 };
 
 #ifdef SQLITE_HAS_CODEC
-typedef NSData* (^YapDatabaseCipherKeyBlock)(void);
+typedef NSData *_Nonnull (^YapDatabaseCipherKeyBlock)(void);
+
+typedef NS_ENUM(NSInteger, YapDatabaseCipherCompatability) {
+    YapDatabaseCipherCompatability_Default   = 0,
+    YapDatabaseCipherCompatability_Version3  = 3,
+    YapDatabaseCipherCompatability_Version4  = 4,
+};
 #endif
 
 @interface YapDatabaseOptions : NSObject <NSCopying>
@@ -47,7 +55,7 @@ typedef NSData* (^YapDatabaseCipherKeyBlock)(void);
  *     and the corrupt file will be deleted.
  *
  * The default value is YapDatabaseCorruptAction_Rename.
-**/
+ */
 @property (nonatomic, assign, readwrite) YapDatabaseCorruptAction corruptAction;
 
 /**
@@ -60,7 +68,7 @@ typedef NSData* (^YapDatabaseCipherKeyBlock)(void);
  * Note that YapDatabase uses sqlite in WAL mode.
  *
  * The default value is YapDatabasePragmaSynchronous_Full.
-**/
+ */
 @property (nonatomic, assign, readwrite) YapDatabasePragmaSynchronous pragmaSynchronous;
 
 /**
@@ -73,7 +81,7 @@ typedef NSData* (^YapDatabaseCipherKeyBlock)(void);
  * 
  * The default value is zero,
  * meaning that every checkpoint will reduce the WAL file to its minimum size (if possible).
-**/
+ */
 @property (nonatomic, assign, readwrite) NSInteger pragmaJournalSizeLimit;
 
 /**
@@ -108,7 +116,7 @@ typedef NSData* (^YapDatabaseCipherKeyBlock)(void);
  * 
  * You can verify whether or not sqlite accepted your page_size configuration request via:
  * - [yapdbConnection pragmaPageSize]
-**/
+ */
 @property (nonatomic, assign, readwrite) NSInteger pragmaPageSize;
 
 /**
@@ -120,6 +128,8 @@ typedef NSData* (^YapDatabaseCipherKeyBlock)(void);
  * This option allows you to enable Memory Mapped I/O.
  * https://www.sqlite.org/mmap.html
  * 
+ * The value is specified in BYTES.
+ *
  * The default value is zero, meaning that Memory Mapped I/O is not used.
  * It is likely that you can achieve improved performance by setting this to a large value.
  * 
@@ -137,7 +147,7 @@ typedef NSData* (^YapDatabaseCipherKeyBlock)(void);
  * 
  * > #ifdef __APPLE__
  * > # include <TargetConditionals.h>
- * > # if TARGET_OS_IPHONE
+ * > # if TARGET_OS_IOS
  * > #   undef SQLITE_MAX_MMAP_SIZE
  * > #   define SQLITE_MAX_MMAP_SIZE 0
  * > # endif
@@ -147,7 +157,7 @@ typedef NSData* (^YapDatabaseCipherKeyBlock)(void);
  * 
  * You can verify whether or not sqlite accepted your mmap_size configuration request via:
  * - [yapdbConnection pragmaMMapSize]
-**/
+ */
 @property (nonatomic, assign, readwrite) NSInteger pragmaMMapSize;
 
 #ifdef SQLITE_HAS_CODEC
@@ -164,8 +174,123 @@ typedef NSData* (^YapDatabaseCipherKeyBlock)(void);
  * in your Podfile for this option to take effect.
  *
  * Important: If you do not set a cipherKeyBlock the database will NOT be configured with encryption.
-**/
+ */
 @property (nonatomic, copy, readwrite) YapDatabaseCipherKeyBlock cipherKeyBlock;
+
+/**
+ * Databases created with SQLCipher 3.0 are not compatible with SQLCipher 4.0.
+ * Setting this flag to YapDatabaseCipherCompatability_Version3 will
+ * set "PRAGMA cipher_compatibility = 3" on the current database.
+ *
+ * For more information see https://www.zetetic.net/sqlcipher/sqlcipher-api/#cipher_compatibility
+ *
+ * Default value is YapDatabaseCipherCompatability_Default which is a no-op.
+ **/
+@property (nonatomic, assign, readwrite) YapDatabaseCipherCompatability cipherCompatability;
+
+/**
+ * Set the PBKDF2 iteration number for deriving the key to the SQLCipher database.
+ *
+ * This is the PBKDF2 iteration number that will be passed to SQLCipher via the 'kdf_iter' pragma.
+ * This parameter will be used everytime the database is openened and you must not change it,
+ * otherwise SQLCipher will not be able to decrypt it.
+ * https://www.zetetic.net/sqlcipher/sqlcipher-api/#kdf_iter
+ *
+ * You must use the 'YapDatabase/SQLCipher' subspec
+ * in your Podfile for this option to take effect.
+ *
+ * This parameter isn't compulsory to a SQLCipher database but it is useful if you want
+ * to customize the iteration count (for performance reasons) of PBKDF.
+ * Default is 64,000 PBKDF2 iterations (effectively 256,000 SHA1 operations)
+  */
+@property (nonatomic, assign, readwrite) NSUInteger kdfIterNumber;
+
+/**
+ * Set the PBKDF2 iteration number for the SQLCipher database.
+ *
+ * In some very specific cases, it is not possible to call 'kdf_iter' (@see kdfIterNumber)
+ * as one of the first operations on a database. In these cases cipherDefaultkdfIterNumber
+ * can be used to globally alter the default number of PBKDF2 iterations used when opening a database.
+ *
+ * This is the PBKDF2 iteration number that will be passed to SQLCipher via the 'cipher_default_kdf_iter' pragma.
+ * This parameter will be used everytime the database is openened and you must not change it,
+ * otherwise SQLCipher will not be able to decrypt it.
+ * https://www.zetetic.net/sqlcipher/sqlcipher-api/#cipher_default_kdf_iter
+ *
+ * You must use the 'YapDatabase/SQLCipher' subspec
+ * in your Podfile for this option to take effect.
+ *
+ * This parameter isn't compulsory to a SQLCipher database but it is useful if you want
+ * to customize the iteration count (for performance reasons) of PBKDF.
+  */
+@property (nonatomic, assign, readwrite) NSUInteger cipherDefaultkdfIterNumber;
+
+/**
+ * Set the page size for the encrypted database. The default page size is 1024 bytes.
+ *
+ * This is the adjusted page size that will be passed to SQLCipher via the 'cipher_page_size' pragma.
+ * This parameter will be used everytime the database is openened and you must not change it,
+ * otherwise SQLCipher will not be able to decrypt it.
+ * https://www.zetetic.net/sqlcipher/sqlcipher-api/#cipher_page_size
+ *
+ * You must use the 'YapDatabase/SQLCipher' subspec
+ * in your Podfile for this option to take effect.
+ *
+ * This parameter isn't compulsory to a SQLCipher database but it is useful if you want
+ * to customize the page size of your encrypted database.
+  */
+@property (nonatomic, assign, readwrite) NSUInteger cipherPageSize;
+
+/**
+ * Set a block here that returns the salt (not the key) for the SQLCipher database.
+ *
+ * This salt that will be passed to SQLCipher via `PRAGMA cipher_salt`.
+ *
+ * This block allows you to fetch the salt from the keychain (or elsewhere)
+ * only when you need it, instead of persisting it in memory.
+ *
+ * You must use the 'YapDatabase/SQLCipher' subspec
+ * in your Podfile for this option to take effect.
+ *
+ * cipherSaltBlock will be ignored if you don't also set cipherKeyBlock and cipherUnencryptedHeaderLength.
+ *
+ * For more information, see comments in YapDatabaseCryptoUtils.h.
+  */
+@property (nonatomic, copy, readwrite) YapDatabaseCipherKeyBlock cipherSaltBlock;
+
+/**
+ * Set a block here that returns the key spec (not the key) for the SQLCipher database.
+ *
+ * This key spec incorporates the "derived key" and the "salt".
+ *
+ * This block allows you to fetch the key spec from the keychain (or elsewhere)
+ * only when you need it, instead of persisting it in memory.
+ *
+ * You must use the 'YapDatabase/SQLCipher' subspec
+ * in your Podfile for this option to take effect.
+ *
+ * cipherKeySpecBlock will be ignored if you don't also set cipherUnencryptedHeaderLength.
+ *
+ * For more information, see comments in YapDatabaseCryptoUtils.h.
+  */
+@property (nonatomic, copy, readwrite) YapDatabaseCipherKeyBlock cipherKeySpecBlock;
+
+/**
+ * If set, this many bytes at the start of the first page of the database will _NOT_
+ * be encrypted.
+ *
+ * This value will be passed to SQLCipher via `PRAGMA cipher_plaintext_header_size`.
+ *
+ * You must use the 'YapDatabase/SQLCipher' subspec
+ * in your Podfile for this option to take effect.
+ *
+ * cipherUnencryptedHeaderLength will be ignored if you don't also set
+ * ((cipherKeyBlock AND cipherSaltBlock) OR cipherKeySpecBlock).
+ *
+ * For more information, see comments in YapDatabaseCryptoUtils.h.
+  */
+@property (nonatomic, assign, readwrite) NSUInteger cipherUnencryptedHeaderLength;
+
 #endif
 
 /**
@@ -198,7 +323,7 @@ typedef NSData* (^YapDatabaseCipherKeyBlock)(void);
  * unless you were benchmarking or stress testing your database system.
  * In which case you may notice this aggressive checkpoint as something of a "stutter" in the system.
  *
- * The default value is (1024 * 1024) (i.e. 1 MB)
+ * The default value is (1024 * 1024 * 4) (i.e. 4 MB)
  * 
  * Remember: This value is specified as a number of bytes. For example:
  * -   1 KB == 1024 * 1
@@ -206,7 +331,32 @@ typedef NSData* (^YapDatabaseCipherKeyBlock)(void);
  * -   1 MB == 1024 * 1024
  * -  10 MB == 1024 * 1024 * 10
  *
-**/
+ */
 @property (nonatomic, assign, readwrite) unsigned long long aggressiveWALTruncationSize;
 
+/**
+ * This option enables multiprocess access to the database.
+ *
+ * All read and write operations will continue to function as expected when multiple processes are
+ * concurrently accessing the database, but some optimizations are disabled when using this mode.
+ *
+ * For instance, when a process updates the database, all other processes must clear their cache to
+ * fetch fresh data from the database.
+ *
+ * In the future, we might communicate changes via IPC accross processes, and it might still be possible
+ * to retain most of the cache in each process.
+ *
+ * If you want to be notified when another process has updated the database (for instance to reload a view),
+ * you can add a `CrossProcessNotifier` extension to the database and receive a
+ * `YapDatabaseModifiedExternallyNotification` notification.
+ *
+ * WARNING: if you are using multiple processes with the same database, all processes MUST register the
+ * same database extensions, otherwise unspecified behavior will happen with the creation and removal of
+ * extension tables depending on when each process was started.
+ *
+ */
+@property (nonatomic, assign, readwrite) BOOL enableMultiProcessSupport;
+
 @end
+
+NS_ASSUME_NONNULL_END

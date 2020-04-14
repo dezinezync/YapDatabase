@@ -1,15 +1,9 @@
 #import <Foundation/Foundation.h>
+#import "YapDatabaseExtensionTypes.h"
 
+@class YapDatabaseReadTransaction;
 
-/**
- * Specifies the kind of block being used.
-**/
-typedef NS_ENUM(NSInteger, YapDatabaseFullTextSearchBlockType) {
-	YapDatabaseFullTextSearchBlockTypeWithKey       = 201,
-	YapDatabaseFullTextSearchBlockTypeWithObject    = 202,
-	YapDatabaseFullTextSearchBlockTypeWithMetadata  = 203,
-	YapDatabaseFullTextSearchBlockTypeWithRow       = 204
-};
+NS_ASSUME_NONNULL_BEGIN
 
 /**
  * The handler block handles extracting the column values for indexing by the FTS module.
@@ -24,26 +18,37 @@ typedef NS_ENUM(NSInteger, YapDatabaseFullTextSearchBlockType) {
  *
  * You should choose a block type that takes the minimum number of required parameters.
  * The extension can make various optimizations based on the required parameters of the block.
-**/
+ */
 @interface YapDatabaseFullTextSearchHandler : NSObject
 
 typedef id YapDatabaseFullTextSearchBlock; // One of YapDatabaseFullTextSearchXBlock types
 
-typedef void (^YapDatabaseFullTextSearchWithKeyBlock)      \
-                            (NSMutableDictionary *dict, NSString *collection, NSString *key);
-typedef void (^YapDatabaseFullTextSearchWithObjectBlock)   \
-                            (NSMutableDictionary *dict, NSString *collection, NSString *key, id object);
-typedef void (^YapDatabaseFullTextSearchWithMetadataBlock) \
-                            (NSMutableDictionary *dict, NSString *collection, NSString *key, id metadata);
-typedef void (^YapDatabaseFullTextSearchWithRowBlock)      \
-                            (NSMutableDictionary *dict, NSString *collection, NSString *key, id object, id metadata);
+typedef void (^YapDatabaseFullTextSearchWithKeyBlock)
+                            (YapDatabaseReadTransaction *transaction, NSMutableDictionary *dict, NSString *collection, NSString *key);
+
+typedef void (^YapDatabaseFullTextSearchWithObjectBlock)
+                            (YapDatabaseReadTransaction *transaction, NSMutableDictionary *dict, NSString *collection, NSString *key, id object);
+
+typedef void (^YapDatabaseFullTextSearchWithMetadataBlock)
+                            (YapDatabaseReadTransaction *transaction, NSMutableDictionary *dict, NSString *collection, NSString *key, __nullable id metadata);
+
+typedef void (^YapDatabaseFullTextSearchWithRowBlock)
+                            (YapDatabaseReadTransaction *transaction, NSMutableDictionary *dict, NSString *collection, NSString *key, id object, __nullable id metadata);
 
 + (instancetype)withKeyBlock:(YapDatabaseFullTextSearchWithKeyBlock)block;
 + (instancetype)withObjectBlock:(YapDatabaseFullTextSearchWithObjectBlock)block;
 + (instancetype)withMetadataBlock:(YapDatabaseFullTextSearchWithMetadataBlock)block;
 + (instancetype)withRowBlock:(YapDatabaseFullTextSearchWithRowBlock)block;
 
++ (instancetype)withOptions:(YapDatabaseBlockInvoke)ops keyBlock:(YapDatabaseFullTextSearchWithKeyBlock)block;
++ (instancetype)withOptions:(YapDatabaseBlockInvoke)ops objectBlock:(YapDatabaseFullTextSearchWithObjectBlock)block;
++ (instancetype)withOptions:(YapDatabaseBlockInvoke)ops metadataBlock:(YapDatabaseFullTextSearchWithMetadataBlock)block;
++ (instancetype)withOptions:(YapDatabaseBlockInvoke)ops rowBlock:(YapDatabaseFullTextSearchWithRowBlock)block;
+
 @property (nonatomic, strong, readonly) YapDatabaseFullTextSearchBlock block;
-@property (nonatomic, assign, readonly) YapDatabaseFullTextSearchBlockType blockType;
+@property (nonatomic, assign, readonly) YapDatabaseBlockType           blockType;
+@property (nonatomic, assign, readonly) YapDatabaseBlockInvoke         blockInvokeOptions;
 
 @end
+
+NS_ASSUME_NONNULL_END

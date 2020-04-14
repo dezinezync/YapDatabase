@@ -15,9 +15,9 @@
  * See YapDatabaseLogging.h for more information.
 **/
 #if DEBUG
-  static const int ydbLogLevel = YDB_LOG_LEVEL_WARN;
+  static const int ydbLogLevel = YDBLogLevelWarning;
 #else
-  static const int ydbLogLevel = YDB_LOG_LEVEL_WARN;
+  static const int ydbLogLevel = YDBLogLevelWarning;
 #endif
 #pragma unused(ydbLogLevel)
 
@@ -44,8 +44,7 @@
 	int status = sqlite3_exec(db, [dropTable UTF8String], NULL, NULL, NULL);
 	if (status != SQLITE_OK)
 	{
-		YDBLogError(@"%@ - Failed dropping table (%@): %d %s",
-		            THIS_METHOD, tableName, status, sqlite3_errmsg(db));
+		YDBLogError(@"Failed dropping table (%@): %d %s", tableName, status, sqlite3_errmsg(db));
 	}
 }
 
@@ -87,11 +86,24 @@
 }
 
 /**
- * Subclasses must implement this method.
- * This method is called during the view registration process to enusre the extension supports
- * the database configuration.
+ * YapDatabaseExtension subclasses may OPTIONALLY implement this method.
+ * This method is called during the extension registration process to enusre the extension (as configured)
+ * will support the given database configuration. This is primarily for extensions with dependecies.
+ *
+ * For example, the YapDatabaseFilteredView is configured with the registered name of a parent View instance.
+ * So that class should implement this method to ensure:
+ * - The parentView actually exists
+ * - The parentView is actually a YapDatabaseView class/subclass
+ *
+ * When this method is invoked, the 'self.registeredName' & 'self.registeredDatabase' properties
+ * will be set and available for inspection.
+ *
+ * @param registeredExtensions
+ *   The current set of registered extensions. (i.e. self.registeredDatabase.registeredExtensions)
+ *
+ * Return YES if the class/instance supports the database configuration.
 **/
-- (BOOL)supportsDatabase:(YapDatabase __unused *)database withRegisteredExtensions:(NSDictionary *)registeredExtensions
+- (BOOL)supportsDatabaseWithRegisteredExtensions:(NSDictionary<NSString*, YapDatabaseExtension*> *)registeredExtensions
 {
 	// Only 1 relationship extension is supported at a time.
 	
@@ -113,7 +125,7 @@
 
 - (YapDatabaseExtensionConnection *)newConnection:(YapDatabaseConnection *)databaseConnection
 {
-	return [[YapDatabaseRelationshipConnection alloc] initWithRelationship:self databaseConnection:databaseConnection];
+	return [[YapDatabaseRelationshipConnection alloc] initWithParent:self databaseConnection:databaseConnection];
 }
 
 - (NSString *)tableName

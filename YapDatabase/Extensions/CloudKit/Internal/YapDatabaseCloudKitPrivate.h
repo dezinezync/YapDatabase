@@ -18,17 +18,18 @@
 
 #import "YapDatabaseExtensionPrivate.h"
 #import "YapCache.h"
-#if DEBUG
-#import "YapDebugDictionary.h"
-#endif
 
-#import "sqlite3.h"
+#ifdef SQLITE_HAS_CODEC
+  #import <SQLCipher/sqlite3.h>
+#else
+  #import "sqlite3.h"
+#endif
 
 /**
  * This version number is stored in the yap2 table.
  * If there is a major re-write to this class, then the version number will be incremented,
  * and the class can automatically rebuild the tables as needed.
-**/
+ */
 #define YAP_DATABASE_CLOUD_KIT_CLASS_VERSION 3
 
 static NSString *const changeset_key_deletedRowids    = @"deletedRowids";    // Array: rowid
@@ -36,6 +37,20 @@ static NSString *const changeset_key_deletedHashes    = @"deletedHashes";    // 
 static NSString *const changeset_key_mappingTableInfo = @"mappingTableInfo"; // Dict : rowid -> CleanMappingTableInfo
 static NSString *const changeset_key_recordTableInfo  = @"recordTableInfo";  // Dict : string -> CleanRecordTableInfo
 static NSString *const changeset_key_reset            = @"reset";
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#pragma mark -
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+@interface YapDatabaseCloudKitRecordHandler () {
+@public
+	
+	YapDatabaseCloudKitRecordBlock block;
+	YapDatabaseBlockType           blockType;
+	YapDatabaseBlockInvoke         blockInvokeOptions;
+}
+
+@end
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #pragma mark -
@@ -68,8 +83,7 @@ static NSString *const changeset_key_reset            = @"reset";
 @interface YapDatabaseCloudKit () {
 @public
 	
-	YapDatabaseCloudKitRecordBlock recordBlock;
-	YapDatabaseCloudKitBlockType recordBlockType;
+	YapDatabaseCloudKitRecordHandler *recordHandler;
 	
 	YapDatabaseCloudKitMergeBlock mergeBlock;
 	YapDatabaseCloudKitOperationErrorBlock opErrorBlock;
@@ -105,13 +119,13 @@ static NSString *const changeset_key_reset            = @"reset";
 	__strong YapDatabaseCloudKit *parent;
 	__unsafe_unretained YapDatabaseConnection *databaseConnection;
 	
-	YapCache *cleanMappingTableInfoCache;
-	YapCache *cleanRecordTableInfoCache;
+	YapCache<NSNumber *, id> *cleanMappingTableInfoCache; // rowid -> {[ NSString, NSNull ]}
+	YapCache<NSString *, id> *cleanRecordTableInfoCache;  // hash  -> {[ YDBCKCleanRecordTableInfo, NSNull ]}
 	
-	NSMutableDictionary *dirtyMappingTableInfoDict;
-	NSMutableDictionary *dirtyRecordTableInfoDict;
+	NSMutableDictionary<NSNumber *, YDBCKDirtyMappingTableInfo *> *dirtyMappingTableInfoDict;
+	NSMutableDictionary<NSString *, YDBCKDirtyRecordTableInfo *> *dirtyRecordTableInfoDict;
 	
-	YapCache *recordKeysCache;
+	YapCache<NSString *, NSArray *> *recordKeysCache;
 	
 	BOOL reset;
 	BOOL isOperationCompletionTransaction;
@@ -196,17 +210,13 @@ static NSString *const changeset_key_reset            = @"reset";
  * 
  * - deletedRecordIDs   : Array of CKRecordID's
  * - modifiedRecords    : Array of YDBCKChangeRecord's (storing either a CKRecord or just changedKeys array)
-**/
+ */
 @interface YDBCKChangeSet () {
 @public
 	
 	NSMutableArray *deletedRecordIDs;
 	
-#if DEBUG
-	YapDebugDictionary *modifiedRecords;
-#else
-	NSMutableDictionary *modifiedRecords;
-#endif
+	NSMutableDictionary<CKRecordID *, YDBCKChangeRecord *> *modifiedRecords;
 }
 
 - (instancetype)initWithUUID:(NSString *)uuid
@@ -222,14 +232,14 @@ static NSString *const changeset_key_reset            = @"reset";
 
 // Inherited:
 //
-// @property (atomic, readonly) BOOL isInFlight;
+// @property (nonatomic, readonly) BOOL isInFlight;
 //
 // @property (nonatomic, readonly) NSString *databaseIdentifier;
 //
 // @property (nonatomic, readonly) NSArray *recordIDsToDelete; // Array of CKRecordID's for CKModifyRecordsOperation
 // @property (nonatomic, readonly) NSArray *recordsToSave;     // Array of CKRecord's for CKModifyRecordsOperation
 
-@property (atomic, readwrite) BOOL isInFlight;
+@property (nonatomic, readwrite) BOOL isInFlight;
 
 @property (nonatomic, strong, readwrite) NSString *uuid;
 @property (nonatomic, strong, readwrite) NSString *prev;
@@ -245,7 +255,7 @@ static NSString *const changeset_key_reset            = @"reset";
 // Blob to go in 'modifiedRecords' column of database row.
 - (NSData *)serializeModifiedRecords;
 
-- (void)enumerateMissingRecordsWithBlock:(CKRecord* (^)(CKRecordID *recordID, NSArray *changedKeys))block;
+- (void)enumerateMissingRecordsWithBlock:(CKRecord* (NS_NOESCAPE^)(CKRecordID *recordID, NSArray *changedKeys))block;
 
 @end
 

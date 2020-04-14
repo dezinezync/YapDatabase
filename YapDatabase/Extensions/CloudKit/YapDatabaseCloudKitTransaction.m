@@ -15,9 +15,9 @@
  * See YapDatabaseLogging.h for more information.
 **/
 #if DEBUG
-  static const int ydbLogLevel = YDB_LOG_LEVEL_VERBOSE | YDB_LOG_FLAG_TRACE;
+  static const int ydbLogLevel = YDBLogLevelWarning; // YDBLogLevelVerbose | YDBLogFlagTrace;
 #else
-  static const int ydbLogLevel = YDB_LOG_LEVEL_WARN;
+  static const int ydbLogLevel = YDBLogLevelWarning;
 #endif
 #pragma unused(ydbLogLevel)
 
@@ -197,8 +197,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 	status = sqlite3_exec(db, [createMappingTable UTF8String], NULL, NULL, NULL);
 	if (status != SQLITE_OK)
 	{
-		YDBLogError(@"%@ - Failed creating table (%@): %d %s",
-		            THIS_METHOD, mappingTableName, status, sqlite3_errmsg(db));
+		YDBLogError(@"Failed creating table (%@): %d %s", mappingTableName, status, sqlite3_errmsg(db));
 		return NO;
 	}
 	
@@ -206,8 +205,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 	status = sqlite3_exec(db, [createMappingTableIndex UTF8String], NULL, NULL, NULL);
 	if (status != SQLITE_OK)
 	{
-		YDBLogError(@"%@ - Failed creating index on table (%@): %d %s",
-					THIS_METHOD, mappingTableName, status, sqlite3_errmsg(db));
+		YDBLogError(@"Failed creating index on table (%@): %d %s", mappingTableName, status, sqlite3_errmsg(db));
 		return NO;
 	}
 	
@@ -229,8 +227,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 	status = sqlite3_exec(db, [createRecordTable UTF8String], NULL, NULL, NULL);
 	if (status != SQLITE_OK)
 	{
-		YDBLogError(@"%@ - Failed creating table (%@): %d %s",
-		            THIS_METHOD, recordTableName, status, sqlite3_errmsg(db));
+		YDBLogError(@"Failed creating table (%@): %d %s", recordTableName, status, sqlite3_errmsg(db));
 		return NO;
 	}
 	
@@ -253,8 +250,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 	status = sqlite3_exec(db, [createQueueTable UTF8String], NULL, NULL, NULL);
 	if (status != SQLITE_OK)
 	{
-		YDBLogError(@"%@ - Failed creating table (%@): %d %s",
-		            THIS_METHOD, queueTableName, status, sqlite3_errmsg(db));
+		YDBLogError(@"Failed creating table (%@): %d %s", queueTableName, status, sqlite3_errmsg(db));
 		return NO;
 	}
 	
@@ -303,7 +299,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 	status = sqlite3_prepare_v2(db, [enumerate UTF8String], -1, &statement, NULL);
 	if (status != SQLITE_OK)
 	{
-		YDBLogError(@"%@: Error creating prepared statement: %d %s", THIS_METHOD, status, sqlite3_errmsg(db));
+		YDBLogError(@"Error creating prepared statement: %d %s", status, sqlite3_errmsg(db));
 		
 		return NO;
 	}
@@ -371,7 +367,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 	
 	if (status != SQLITE_DONE)
 	{
-		YDBLogError(@"%@ - Error executing statement: %d %s", THIS_METHOD,
+		YDBLogError(@"Error executing statement: %d %s",
 					status, sqlite3_errmsg(databaseTransaction->connection->db));
 	}
 	
@@ -464,59 +460,74 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 	
 	void (^RestoreRecordBlock)(int64_t rowid, CKRecord **inOutRecord, YDBCKRecordInfo *recordInfo);
 	
-	YapDatabaseCloudKitBlockType recordBlockType = parentConnection->parent->recordBlockType;
-	if (recordBlockType == YapDatabaseCloudKitBlockTypeWithKey)
+	__unsafe_unretained YapDatabaseCloudKitRecordHandler *recordHandler = parentConnection->parent->recordHandler;
+	
+	if (recordHandler->blockType == YapDatabaseBlockTypeWithKey)
 	{
 		__unsafe_unretained YapDatabaseCloudKitRecordWithKeyBlock recordBlock =
-		  (YapDatabaseCloudKitRecordWithKeyBlock)parentConnection->parent->recordBlock;
+		  (YapDatabaseCloudKitRecordWithKeyBlock)recordHandler->block;
 		
 		RestoreRecordBlock = ^(int64_t rowid, CKRecord **inOutRecord, YDBCKRecordInfo *recordInfo) {
+		#pragma clang diagnostic push
+		#pragma clang diagnostic ignored "-Wimplicit-retain-self"
 			
 			YapCollectionKey *ck = [databaseTransaction collectionKeyForRowid:rowid];
 			if (ck)
 			{
-				recordBlock(inOutRecord, recordInfo, ck.collection, ck.key);
+				recordBlock(databaseTransaction, inOutRecord, recordInfo, ck.collection, ck.key);
 			}
+			
+		#pragma clang diagnostic pop
 		};
 	}
-	else if (recordBlockType == YapDatabaseCloudKitBlockTypeWithObject)
+	else if (recordHandler->blockType == YapDatabaseBlockTypeWithObject)
 	{
 		__unsafe_unretained YapDatabaseCloudKitRecordWithObjectBlock recordBlock =
-		  (YapDatabaseCloudKitRecordWithObjectBlock)parentConnection->parent->recordBlock;
+		  (YapDatabaseCloudKitRecordWithObjectBlock)recordHandler->block;
 		
 		RestoreRecordBlock = ^(int64_t rowid, CKRecord **inOutRecord, YDBCKRecordInfo *recordInfo) {
+		#pragma clang diagnostic push
+		#pragma clang diagnostic ignored "-Wimplicit-retain-self"
 			
 			YapCollectionKey *ck = nil;
 			id object = nil;
 			
 			if ([databaseTransaction getCollectionKey:&ck object:&object forRowid:rowid])
 			{
-				recordBlock(inOutRecord, recordInfo, ck.collection, ck.key, object);
+				recordBlock(databaseTransaction, inOutRecord, recordInfo, ck.collection, ck.key, object);
 			}
+			
+		#pragma clang diagnostic pop
 		};
 	}
-	else if (recordBlockType == YapDatabaseCloudKitBlockTypeWithMetadata)
+	else if (recordHandler->blockType == YapDatabaseBlockTypeWithMetadata)
 	{
 		__unsafe_unretained YapDatabaseCloudKitRecordWithMetadataBlock recordBlock =
-		  (YapDatabaseCloudKitRecordWithMetadataBlock)parentConnection->parent->recordBlock;
+		  (YapDatabaseCloudKitRecordWithMetadataBlock)recordHandler->block;
 		
 		RestoreRecordBlock = ^(int64_t rowid, CKRecord **inOutRecord, YDBCKRecordInfo *recordInfo) {
+		#pragma clang diagnostic push
+		#pragma clang diagnostic ignored "-Wimplicit-retain-self"
 			
 			YapCollectionKey *ck = nil;
 			id metadata = nil;
 			
 			if ([databaseTransaction getCollectionKey:&ck metadata:&metadata forRowid:rowid])
 			{
-				recordBlock(inOutRecord, recordInfo, ck.collection, ck.key, metadata);
+				recordBlock(databaseTransaction, inOutRecord, recordInfo, ck.collection, ck.key, metadata);
 			}
+			
+		#pragma clang diagnostic pop
 		};
 	}
-	else // if (recordBlockType == YapDatabaseCloudKitBlockTypeWithRow)
+	else // if (recordHandler->blockType == YapDatabaseBlockTypeWithRow)
 	{
 		__unsafe_unretained YapDatabaseCloudKitRecordWithRowBlock recordBlock =
-		  (YapDatabaseCloudKitRecordWithRowBlock)parentConnection->parent->recordBlock;
+		  (YapDatabaseCloudKitRecordWithRowBlock)recordHandler->block;
 		
 		RestoreRecordBlock = ^(int64_t rowid, CKRecord **inOutRecord, YDBCKRecordInfo *recordInfo) {
+		#pragma clang diagnostic push
+		#pragma clang diagnostic ignored "-Wimplicit-retain-self"
 			
 			YapCollectionKey *ck = nil;
 			id object = nil;
@@ -524,8 +535,10 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 			
 			if ([databaseTransaction getCollectionKey:&ck object:&object metadata:&metadata forRowid:rowid])
 			{
-				recordBlock(inOutRecord, recordInfo, ck.collection, ck.key, object, metadata);
+				recordBlock(databaseTransaction, inOutRecord, recordInfo, ck.collection, ck.key, object, metadata);
 			}
+			
+		#pragma clang diagnostic pop
 		};
 	}
 	
@@ -575,6 +588,8 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 	
 	void (^InsertRecord)(CKRecord*, YDBCKRecordInfo*, int64_t);
 	InsertRecord = ^(CKRecord *record, YDBCKRecordInfo *recordInfo, int64_t rowid) {
+	#pragma clang diagnostic push
+	#pragma clang diagnostic ignored "-Wimplicit-retain-self"
 		
 		NSString *databaseIdentifier = recordInfo.databaseIdentifier;
 		NSString *hash = [self hashRecordID:record.recordID databaseIdentifier:databaseIdentifier];
@@ -614,18 +629,21 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 			[dirtyRecordTableInfo incrementOwnerCount];
 			[dirtyRecordTableInfo mergeOriginalValues:recordInfo.originalValues];
 		}
+		
+	#pragma clang diagnostic pop
 	};
 	
 	YDBCKRecordInfo *recordInfo = [[YDBCKRecordInfo alloc] init];
 	recordInfo.versionInfo = parentConnection->parent->versionInfo;
 	
-	YapDatabaseCloudKitBlockType recordBlockType = parentConnection->parent->recordBlockType;
+	__unsafe_unretained YapDatabaseCloudKitRecordHandler *recordHandler = parentConnection->parent->recordHandler;
+	
 	YapWhitelistBlacklist *allowedCollections = parentConnection->parent->options.allowedCollections;
 	
-	if (recordBlockType == YapDatabaseCloudKitBlockTypeWithKey)
+	if (recordHandler->blockType == YapDatabaseBlockTypeWithKey)
 	{
 		__unsafe_unretained YapDatabaseCloudKitRecordWithKeyBlock recordBlock =
-		  (YapDatabaseCloudKitRecordWithKeyBlock)parentConnection->parent->recordBlock;
+		  (YapDatabaseCloudKitRecordWithKeyBlock)recordHandler->block;
 		
 		void (^enumBlock)(int64_t rowid, NSString *collection, NSString *key, BOOL *stop);
 		enumBlock = ^(int64_t rowid, NSString *collection, NSString *key, BOOL *stop) {
@@ -634,7 +652,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 			recordInfo.databaseIdentifier = nil;
 			recordInfo.originalValues = nil;
 			
-			recordBlock(&record, recordInfo, collection, key);
+			recordBlock(self->databaseTransaction, &record, recordInfo, collection, key);
 			
 			if (record) {
 				InsertRecord(record, recordInfo, rowid);
@@ -647,7 +665,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 				
 				if ([allowedCollections isAllowed:collection])
 				{
-					[databaseTransaction _enumerateKeysInCollections:@[ collection ] usingBlock:enumBlock];
+					[self->databaseTransaction _enumerateKeysInCollections:@[ collection ] usingBlock:enumBlock];
 				}
 			}];
 		}
@@ -656,10 +674,10 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 			[databaseTransaction _enumerateKeysInAllCollectionsUsingBlock:enumBlock];
 		}
 	}
-	else if (recordBlockType == YapDatabaseCloudKitBlockTypeWithObject)
+	else if (recordHandler->blockType == YapDatabaseBlockTypeWithObject)
 	{
 		__unsafe_unretained YapDatabaseCloudKitRecordWithObjectBlock recordBlock =
-		  (YapDatabaseCloudKitRecordWithObjectBlock)parentConnection->parent->recordBlock;
+		  (YapDatabaseCloudKitRecordWithObjectBlock)recordHandler->block;
 		
 		void (^enumBlock)(int64_t rowid, NSString *collection, NSString *key, id object, BOOL *stop);
 		enumBlock = ^(int64_t rowid, NSString *collection, NSString *key, id object, BOOL *stop) {
@@ -668,7 +686,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 			recordInfo.databaseIdentifier = nil;
 			recordInfo.originalValues = nil;
 			
-			recordBlock(&record, recordInfo, collection, key, object);
+			recordBlock(self->databaseTransaction, &record, recordInfo, collection, key, object);
 			
 			if (record) {
 				InsertRecord(record, recordInfo, rowid);
@@ -681,7 +699,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 				
 				if ([allowedCollections isAllowed:collection])
 				{
-					[databaseTransaction _enumerateKeysAndObjectsInCollections:@[ collection ] usingBlock:enumBlock];
+					[self->databaseTransaction _enumerateKeysAndObjectsInCollections:@[ collection ] usingBlock:enumBlock];
 				}
 			}];
 		}
@@ -690,10 +708,10 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 			[databaseTransaction _enumerateKeysAndObjectsInAllCollectionsUsingBlock:enumBlock];
 		}
 	}
-	else if (recordBlockType == YapDatabaseCloudKitBlockTypeWithMetadata)
+	else if (recordHandler->blockType == YapDatabaseBlockTypeWithMetadata)
 	{
 		__unsafe_unretained YapDatabaseCloudKitRecordWithMetadataBlock recordBlock =
-		  (YapDatabaseCloudKitRecordWithMetadataBlock)parentConnection->parent->recordBlock;
+		  (YapDatabaseCloudKitRecordWithMetadataBlock)recordHandler->block;
 		
 		void (^enumBlock)(int64_t rowid, NSString *collection, NSString *key, id metadata, BOOL *stop);
 		enumBlock = ^(int64_t rowid, NSString *collection, NSString *key, id metadata, BOOL *stop) {
@@ -702,7 +720,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 			recordInfo.databaseIdentifier = nil;
 			recordInfo.originalValues = nil;
 			
-			recordBlock(&record, recordInfo, collection, key, metadata);
+			recordBlock(self->databaseTransaction, &record, recordInfo, collection, key, metadata);
 			
 			if (record) {
 				InsertRecord(record, recordInfo, rowid);
@@ -715,7 +733,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 				
 				if ([allowedCollections isAllowed:collection])
 				{
-					[databaseTransaction _enumerateKeysAndMetadataInCollections:@[ collection ] usingBlock:enumBlock];
+					[self->databaseTransaction _enumerateKeysAndMetadataInCollections:@[ collection ] usingBlock:enumBlock];
 				}
 			}];
 		}
@@ -724,10 +742,10 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 			[databaseTransaction _enumerateKeysAndMetadataInAllCollectionsUsingBlock:enumBlock];
 		}
 	}
-	else // if (recordBlockType == YapDatabaseCloudKitBlockTypeWithRow)
+	else // if (recordHandler->blockType == YapDatabaseBlockTypeWithRow)
 	{
 		__unsafe_unretained YapDatabaseCloudKitRecordWithRowBlock recordBlock =
-		  (YapDatabaseCloudKitRecordWithRowBlock)parentConnection->parent->recordBlock;
+		  (YapDatabaseCloudKitRecordWithRowBlock)recordHandler->block;
 		
 		void (^enumBlock)(int64_t rowid, NSString *collection, NSString *key, id object, id metadata, BOOL *stop);
 		enumBlock = ^(int64_t rowid, NSString *collection, NSString *key, id object, id metadata, BOOL *stop) {
@@ -736,7 +754,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 			recordInfo.databaseIdentifier = nil;
 			recordInfo.originalValues = nil;
 			
-			recordBlock(&record, recordInfo, collection, key, object, metadata);
+			recordBlock(self->databaseTransaction, &record, recordInfo, collection, key, object, metadata);
 			
 			if (record) {
 				InsertRecord(record, recordInfo, rowid);
@@ -749,7 +767,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 				
 				if ([allowedCollections isAllowed:collection])
 				{
-					[databaseTransaction _enumerateRowsInCollections:@[ collection ] usingBlock:enumBlock];
+					[self->databaseTransaction _enumerateRowsInCollections:@[ collection ] usingBlock:enumBlock];
 				}
 			}];
 		}
@@ -784,7 +802,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 		if ([recordTableInfo isKindOfClass:[YDBCKCleanRecordTableInfo class]])
 		{
 			__unsafe_unretained YDBCKCleanRecordTableInfo *cleanRecordTableInfo =
-			  (YDBCKCleanRecordTableInfo *)recordInfo;
+			  (YDBCKCleanRecordTableInfo *)recordTableInfo;
 			
 			record = [cleanRecordTableInfo.record safeCopy];
 		}
@@ -801,19 +819,20 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 		}
 	};
 	
-	YapDatabaseCloudKitBlockType recordBlockType = parentConnection->parent->recordBlockType;
+	__unsafe_unretained YapDatabaseCloudKitRecordHandler *recordHandler = parentConnection->parent->recordHandler;
+	
 	YapWhitelistBlacklist *allowedCollections = parentConnection->parent->options.allowedCollections;
 	
-	if (recordBlockType == YapDatabaseCloudKitBlockTypeWithKey)
+	if (recordHandler->blockType == YapDatabaseBlockTypeWithKey)
 	{
 		__unsafe_unretained YapDatabaseCloudKitRecordWithKeyBlock recordBlock =
-		  (YapDatabaseCloudKitRecordWithKeyBlock)parentConnection->parent->recordBlock;
+		  (YapDatabaseCloudKitRecordWithKeyBlock)recordHandler->block;
 		
 		void (^enumBlock)(int64_t rowid, NSString *collection, NSString *key, BOOL *stop);
 		enumBlock = ^(int64_t rowid, NSString *collection, NSString *key, BOOL *stop) {
 			
 			enumHelperBlock(rowid);
-			recordBlock(&record, recordInfo, collection, key);
+			recordBlock(self->databaseTransaction, &record, recordInfo, collection, key);
 			
 			[self processRecord:record recordInfo:recordInfo
 			                    preCalculatedHash:nil
@@ -829,7 +848,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 				
 				if ([allowedCollections isAllowed:collection])
 				{
-					[databaseTransaction _enumerateKeysInCollections:@[ collection ] usingBlock:enumBlock];
+					[self->databaseTransaction _enumerateKeysInCollections:@[ collection ] usingBlock:enumBlock];
 				}
 			}];
 		}
@@ -838,16 +857,16 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 			[databaseTransaction _enumerateKeysInAllCollectionsUsingBlock:enumBlock];
 		}
 	}
-	else if (recordBlockType == YapDatabaseCloudKitBlockTypeWithObject)
+	else if (recordHandler->blockType == YapDatabaseBlockTypeWithObject)
 	{
 		__unsafe_unretained YapDatabaseCloudKitRecordWithObjectBlock recordBlock =
-		  (YapDatabaseCloudKitRecordWithObjectBlock)parentConnection->parent->recordBlock;
+		  (YapDatabaseCloudKitRecordWithObjectBlock)recordHandler->block;
 		
 		void (^enumBlock)(int64_t rowid, NSString *collection, NSString *key, id object, BOOL *stop);
 		enumBlock = ^(int64_t rowid, NSString *collection, NSString *key, id object, BOOL *stop) {
 			
 			enumHelperBlock(rowid);
-			recordBlock(&record, recordInfo, collection, key, object);
+			recordBlock(self->databaseTransaction, &record, recordInfo, collection, key, object);
 			
 			[self processRecord:record recordInfo:recordInfo
 			                    preCalculatedHash:nil
@@ -863,7 +882,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 				
 				if ([allowedCollections isAllowed:collection])
 				{
-					[databaseTransaction _enumerateKeysAndObjectsInCollections:@[ collection ] usingBlock:enumBlock];
+					[self->databaseTransaction _enumerateKeysAndObjectsInCollections:@[ collection ] usingBlock:enumBlock];
 				}
 			}];
 		}
@@ -872,16 +891,16 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 			[databaseTransaction _enumerateKeysAndObjectsInAllCollectionsUsingBlock:enumBlock];
 		}
 	}
-	else if (recordBlockType == YapDatabaseCloudKitBlockTypeWithMetadata)
+	else if (recordHandler->blockType == YapDatabaseBlockTypeWithMetadata)
 	{
 		__unsafe_unretained YapDatabaseCloudKitRecordWithMetadataBlock recordBlock =
-		  (YapDatabaseCloudKitRecordWithMetadataBlock)parentConnection->parent->recordBlock;
+		  (YapDatabaseCloudKitRecordWithMetadataBlock)recordHandler->block;
 		
 		void (^enumBlock)(int64_t rowid, NSString *collection, NSString *key, id metadata, BOOL *stop);
 		enumBlock = ^(int64_t rowid, NSString *collection, NSString *key, id metadata, BOOL *stop) {
 			
 			enumHelperBlock(rowid);
-			recordBlock(&record, recordInfo, collection, key, metadata);
+			recordBlock(self->databaseTransaction, &record, recordInfo, collection, key, metadata);
 			
 			[self processRecord:record recordInfo:recordInfo
 			                    preCalculatedHash:nil
@@ -897,7 +916,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 				
 				if ([allowedCollections isAllowed:collection])
 				{
-					[databaseTransaction _enumerateKeysAndMetadataInCollections:@[ collection ] usingBlock:enumBlock];
+					[self->databaseTransaction _enumerateKeysAndMetadataInCollections:@[ collection ] usingBlock:enumBlock];
 				}
 			}];
 		}
@@ -906,16 +925,16 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 			[databaseTransaction _enumerateKeysAndMetadataInAllCollectionsUsingBlock:enumBlock];
 		}
 	}
-	else // if (recordBlockType == YapDatabaseCloudKitBlockTypeWithRow)
+	else // if (recordHandler->blockType == YapDatabaseBlockTypeWithRow)
 	{
 		__unsafe_unretained YapDatabaseCloudKitRecordWithRowBlock recordBlock =
-		  (YapDatabaseCloudKitRecordWithRowBlock)parentConnection->parent->recordBlock;
+		  (YapDatabaseCloudKitRecordWithRowBlock)recordHandler->block;
 		
 		void (^enumBlock)(int64_t rowid, NSString *collection, NSString *key, id object, id metadata, BOOL *stop);
 		enumBlock = ^(int64_t rowid, NSString *collection, NSString *key, id object, id metadata, BOOL *stop) {
 			
 			enumHelperBlock(rowid);
-			recordBlock(&record, recordInfo, collection, key, object, metadata);
+			recordBlock(self->databaseTransaction, &record, recordInfo, collection, key, object, metadata);
 			
 			[self processRecord:record recordInfo:recordInfo
 			                    preCalculatedHash:nil
@@ -931,7 +950,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 				
 				if ([allowedCollections isAllowed:collection])
 				{
-					[databaseTransaction _enumerateRowsInCollections:@[ collection ] usingBlock:enumBlock];
+					[self->databaseTransaction _enumerateRowsInCollections:@[ collection ] usingBlock:enumBlock];
 				}
 			}];
 		}
@@ -1024,7 +1043,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 	uint8_t bufferStack[maxStackSize];
 	void *buffer = NULL;
 	
-	if (maxLen <= maxStackSize)
+	if (maxLen <= (NSUInteger)maxStackSize)
 		buffer = bufferStack;
 	else
 		buffer = malloc((size_t)maxLen);
@@ -1063,7 +1082,9 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 	
 	if (dbid)
 	{
-		memcpy(buffer, (void *)'_', 1); // prefix with underscore to differentiate between nil & empty-string
+		// prefix with underscore to differentiate between nil & empty-string
+		char underscore = '_';
+		memcpy(buffer, (void *)&underscore, 1);
 		
 		[dbid getBytes:(buffer + 1)
 		     maxLength:(maxLen - 1)
@@ -1081,7 +1102,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 	NSData *hashData = [NSData dataWithBytesNoCopy:(void *)hashBytes length:CC_SHA1_DIGEST_LENGTH freeWhenDone:NO];
 	NSString *hashStr = [hashData base64EncodedStringWithOptions:0];
 	
-	if (maxLen > maxStackSize) {
+	if (maxLen > (NSUInteger)maxStackSize) {
 		free(buffer);
 	}
 	return hashStr;
@@ -1409,7 +1430,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 }
 
 /**
- * This method is called from handleRemoveObjectsForKeys:inCollection:withRowids:.
+ * This method is called from didRemoveObjectsForKeys:inCollection:withRowids:.
  *
  * It's used to fetch all the mappingTableInfo items for all the given rowids.
  * This information is used in order to determine which rowids are mapped to a CKRecords (in the record table).
@@ -1473,7 +1494,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 		sqlite3 *db = databaseTransaction->connection->db;
 		
 		// Note:
-		// The handleRemoveObjectsForKeys:inCollection:withRowids: has the following guarantee:
+		// The didRemoveObjectsForKeys:inCollection:withRowids: has the following guarantee:
 		//     count <= (SQLITE_LIMIT_VARIABLE_NUMBER - 1)
 		//
 		// So we don't have to worry about sqlite's upper bound on host parameters.
@@ -1505,10 +1526,10 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 		status = sqlite3_prepare_v2(db, [query UTF8String], -1, &statement, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"%@ (%@): Error creating statement\n"
+			YDBLogError(@"(%@): Error creating statement\n"
 			            @" - status(%d), errmsg: %s\n"
 			            @" - query: %@",
-			            THIS_METHOD, [self registeredName], status, sqlite3_errmsg(db), query);
+			            [self registeredName], status, sqlite3_errmsg(db), query);
 			
 			return foundRowids;
 		}
@@ -1543,8 +1564,8 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 		
 		if (status != SQLITE_DONE)
 		{
-			YDBLogError(@"%@ (%@): Error executing statement: %d %s",
-						THIS_METHOD, [self registeredName], status, sqlite3_errmsg(db));
+			YDBLogError(@"(%@): Error executing statement: %d %s",
+			            [self registeredName], status, sqlite3_errmsg(db));
 		}
 		
 		sqlite3_finalize(statement);
@@ -1581,8 +1602,8 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 		int status = sqlite3_step(statement);
 		if (status == SQLITE_ERROR)
 		{
-			YDBLogError(@"%@ - Error executing statement (insert): %d %s", THIS_METHOD,
-						status, sqlite3_errmsg(databaseTransaction->connection->db));
+			YDBLogError(@"Error executing statement (insert): %d %s",
+			            status, sqlite3_errmsg(databaseTransaction->connection->db));
 		}
 		
 		sqlite3_clear_bindings(statement);
@@ -1616,7 +1637,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 		int status = sqlite3_step(statement);
 		if (status == SQLITE_ERROR)
 		{
-			YDBLogError(@"%@ - Error executing statement (insert): %d %s", THIS_METHOD,
+			YDBLogError(@"Error executing statement (insert): %d %s",
 						status, sqlite3_errmsg(databaseTransaction->connection->db));
 		}
 		
@@ -1644,7 +1665,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 	int status = sqlite3_step(statement);
 	if (status == SQLITE_ERROR)
 	{
-		YDBLogError(@"%@ - Error executing statement (remove): %d %s", THIS_METHOD,
+		YDBLogError(@"Error executing statement (remove): %d %s",
 					status, sqlite3_errmsg(databaseTransaction->connection->db));
 	}
 	
@@ -1668,7 +1689,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 	int status = sqlite3_step(statement);
 	if (status != SQLITE_DONE)
 	{
-		YDBLogError(@"%@ - Error executing statement: %d %s", THIS_METHOD,
+		YDBLogError(@"Error executing statement: %d %s",
 		            status, sqlite3_errmsg(databaseTransaction->connection->db));
 	}
 	
@@ -1861,7 +1882,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 }
 
 /**
- * This method is called from handleRemoveObjectsForKeys:inCollection:withRowids:.
+ * This method is called from didRemoveObjectsForKeys:inCollection:withRowids:.
  * 
  * It's used to fetch all the recordInfo items for all the given rowids.
  * This information is used in order to determine which rowids have associated CKRecords,
@@ -1924,7 +1945,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 		sqlite3 *db = databaseTransaction->connection->db;
 		
 		// Note:
-		// The handleRemoveObjectsForKeys:inCollection:withRowids: has the following guarantee:
+		// The didRemoveObjectsForKeys:inCollection:withRowids: has the following guarantee:
 		//     count <= (SQLITE_LIMIT_VARIABLE_NUMBER - 1)
 		//
 		// So we don't have to worry about sqlite's upper bound on host parameters.
@@ -1960,10 +1981,10 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 		status = sqlite3_prepare_v2(db, [query UTF8String], -1, &statement, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"%@ (%@): Error creating statement\n"
+			YDBLogError(@"(%@): Error creating statement\n"
 			            @" - status(%d), errmsg: %s\n"
 			            @" - query: %@",
-			            THIS_METHOD, [self registeredName], status, sqlite3_errmsg(db), query);
+			            [self registeredName], status, sqlite3_errmsg(db), query);
 			
 			return foundHashes;
 		}
@@ -2021,8 +2042,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 		
 		if (status != SQLITE_DONE)
 		{
-			YDBLogError(@"%@ (%@): Error executing statement: %d %s",
-						THIS_METHOD, [self registeredName], status, sqlite3_errmsg(db));
+			YDBLogError(@"(%@): Error executing statement: %d %s", [self registeredName], status, sqlite3_errmsg(db));
 		}
 		
 		sqlite3_finalize(statement);
@@ -2084,7 +2104,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 	int status = sqlite3_step(statement);
 	if (status != SQLITE_DONE)
 	{
-		YDBLogError(@"%@ - Error executing statement: %d %s", THIS_METHOD,
+		YDBLogError(@"Error executing statement: %d %s",
 		            status, sqlite3_errmsg(databaseTransaction->connection->db));
 	}
 	
@@ -2138,7 +2158,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 		int status = sqlite3_step(statement);
 		if (status != SQLITE_DONE)
 		{
-			YDBLogError(@"%@ - Error executing statement (A): %d %s", THIS_METHOD,
+			YDBLogError(@"Error executing statement (A): %d %s",
 						status, sqlite3_errmsg(databaseTransaction->connection->db));
 		}
 		
@@ -2180,7 +2200,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 	int status = sqlite3_step(statement);
 	if (status != SQLITE_DONE)
 	{
-		YDBLogError(@"%@ - Error executing statement (A): %d %s", THIS_METHOD,
+		YDBLogError(@"Error executing statement (A): %d %s",
 		            status, sqlite3_errmsg(databaseTransaction->connection->db));
 	}
 	
@@ -2199,7 +2219,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 	YDBLogAutoTrace();
 	
 	if (hash == nil) {
-		YDBLogWarn(@"%@ - Invalid parameter: hash == nil", THIS_METHOD);
+		YDBLogWarn(@"Invalid parameter: hash == nil");
 		return;
 	}
 	
@@ -2220,7 +2240,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 	int status = sqlite3_step(statement);
 	if (status == SQLITE_ERROR)
 	{
-		YDBLogError(@"%@ - Error executing statement: %d %s", THIS_METHOD,
+		YDBLogError(@"Error executing statement: %d %s",
 		            status, sqlite3_errmsg(databaseTransaction->connection->db));
 	}
 	
@@ -2280,10 +2300,10 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 		status = sqlite3_prepare_v2(db, [query UTF8String], -1, &statement, NULL);
 		if (status != SQLITE_OK)
 		{
-			YDBLogError(@"%@ (%@): Error creating statement\n"
+			YDBLogError(@"(%@): Error creating statement\n"
 			            @" - status(%d), errmsg: %s\n"
 			            @" - query: %@",
-			            THIS_METHOD, [self registeredName], status, sqlite3_errmsg(db), query);
+			            [self registeredName], status, sqlite3_errmsg(db), query);
 			
 			return;
 		}
@@ -2300,8 +2320,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 		status = sqlite3_step(statement);
 		if (status != SQLITE_DONE)
 		{
-			YDBLogError(@"%@ (%@): Error executing statement: %d %s",
-						THIS_METHOD, [self registeredName], status, sqlite3_errmsg(db));
+			YDBLogError(@"(%@): Error executing statement: %d %s", [self registeredName], status, sqlite3_errmsg(db));
 		}
 		
 		sqlite3_finalize(statement);
@@ -2330,7 +2349,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 	int status = sqlite3_step(statement);
 	if (status != SQLITE_DONE)
 	{
-		YDBLogError(@"%@ - Error executing statement: %d %s", THIS_METHOD,
+		YDBLogError(@"Error executing statement: %d %s",
 		            status, sqlite3_errmsg(databaseTransaction->connection->db));
 	}
 	
@@ -2433,7 +2452,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 	int status = sqlite3_step(statement);
 	if (status != SQLITE_DONE)
 	{
-		YDBLogError(@"%@ - Error executing statement: %d %s", THIS_METHOD,
+		YDBLogError(@"Error executing statement: %d %s",
 		            status, sqlite3_errmsg(databaseTransaction->connection->db));
 	}
 	
@@ -2481,7 +2500,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 		int status = sqlite3_step(statement);
 		if (status != SQLITE_DONE)
 		{
-			YDBLogError(@"%@ - Error executing statement: %d %s", THIS_METHOD,
+			YDBLogError(@"Error executing statement: %d %s",
 			            status, sqlite3_errmsg(databaseTransaction->connection->db));
 		}
 		
@@ -2516,7 +2535,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 		int status = sqlite3_step(statement);
 		if (status != SQLITE_DONE)
 		{
-			YDBLogError(@"%@ - Error executing statement: %d %s", THIS_METHOD,
+			YDBLogError(@"Error executing statement: %d %s",
 			            status, sqlite3_errmsg(databaseTransaction->connection->db));
 		}
 		
@@ -2559,7 +2578,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 		int status = sqlite3_step(statement);
 		if (status != SQLITE_DONE)
 		{
-			YDBLogError(@"%@ - Error executing statement: %d %s", THIS_METHOD,
+			YDBLogError(@"Error executing statement: %d %s",
 			            status, sqlite3_errmsg(databaseTransaction->connection->db));
 		}
 		
@@ -2593,7 +2612,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 	int status = sqlite3_step(statement);
 	if (status != SQLITE_DONE)
 	{
-		YDBLogError(@"%@ - Error executing statement: %d %s", THIS_METHOD,
+		YDBLogError(@"Error executing statement: %d %s",
 		            status, sqlite3_errmsg(databaseTransaction->connection->db));
 	}
 	
@@ -2854,7 +2873,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /**
- * Subclasses MUST implement this method.
+ * Subclasses may OPTIONALLY implement this method.
  * This method is only called if within a readwrite transaction.
  *
  * Subclasses should write any last changes to their database table(s) if needed,
@@ -2893,6 +2912,8 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 	// Update mapping table.
 	
 	[parentConnection->dirtyMappingTableInfoDict enumerateKeysAndObjectsUsingBlock:^(id key, id obj, BOOL *stop) {
+	#pragma clang diagnostic push
+	#pragma clang diagnostic ignored "-Wimplicit-retain-self"
 		
 		__unsafe_unretained NSNumber *rowidNumber = (NSNumber *)key;
 		__unsafe_unretained YDBCKDirtyMappingTableInfo *dirtyMappingTableInfo = (YDBCKDirtyMappingTableInfo *)obj;
@@ -2918,6 +2939,8 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 			[parentConnection->changeset_mappingTableInfo setObject:cleanMappingTableInfo forKey:rowidNumber];
 			[parentConnection->cleanMappingTableInfoCache setObject:cleanMappingTableInfo forKey:rowidNumber];
 		}
+		
+	#pragma clang diagnostic pop
 	}];
 	
 	// Step 2 of 6:
@@ -2925,6 +2948,8 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 	// Update record table.
 	
 	[parentConnection->dirtyRecordTableInfoDict enumerateKeysAndObjectsUsingBlock:^(id key, id obj, BOOL *stop) {
+	#pragma clang diagnostic push
+	#pragma clang diagnostic ignored "-Wimplicit-retain-self"
 		
 		__unsafe_unretained NSString *hash = (NSString *)key;
 		__unsafe_unretained YDBCKDirtyRecordTableInfo *dirtyRecordTableInfo = (YDBCKDirtyRecordTableInfo *)obj;
@@ -2980,6 +3005,8 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 			[parentConnection->changeset_recordTableInfo setObject:cleanRecordTableInfo forKey:hash];
 			[parentConnection->cleanRecordTableInfoCache setObject:cleanRecordTableInfo forKey:hash];
 		}
+		
+	#pragma clang diagnostic pop
 	}];
 	
 	// Step 3 of 6:
@@ -3157,13 +3184,13 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /**
- * YapDatabase extension hook.
- * This method is invoked by a YapDatabaseReadWriteTransaction as a post-operation-hook.
+ * Private helper method for other handleXXX hook methods.
 **/
-- (void)handleInsertObject:(id)object
-          forCollectionKey:(YapCollectionKey *)collectionKey
-              withMetadata:(id)metadata
-                     rowid:(int64_t)rowid
+- (void)_handleChangeWithRowid:(int64_t)rowid
+                 collectionKey:(YapCollectionKey *)collectionKey
+                        object:(id)object
+                      metadata:(id)metadata
+                      isInsert:(BOOL)isInsert
 {
 	YDBLogAutoTrace();
 	
@@ -3176,6 +3203,91 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 	{
 		return;
 	}
+	
+	// Invoke the recordBlock.
+	
+	id <YDBCKMappingTableInfo> mappingTableInfo = nil;
+	id <YDBCKRecordTableInfo> recordTableInfo = nil;
+	CKRecord *record = nil;
+	
+	if (!isInsert)
+	{
+		mappingTableInfo = [self mappingTableInfoForRowid:rowid cacheResult:YES];
+		if (mappingTableInfo)
+		{
+			recordTableInfo = [self recordTableInfoForHash:mappingTableInfo.current_recordTable_hash cacheResult:YES];
+		
+			if ([recordTableInfo isKindOfClass:[YDBCKCleanRecordTableInfo class]])
+			{
+				__unsafe_unretained YDBCKCleanRecordTableInfo *cleanRecordTableInfo =
+				(YDBCKCleanRecordTableInfo *)recordTableInfo;
+				
+				record = [cleanRecordTableInfo.record safeCopy];
+			}
+			else if ([recordTableInfo isKindOfClass:[YDBCKDirtyRecordTableInfo class]])
+			{
+				__unsafe_unretained YDBCKDirtyRecordTableInfo *dirtyRecordTableInfo =
+				(YDBCKDirtyRecordTableInfo *)recordTableInfo;
+				
+				record = dirtyRecordTableInfo.dirty_record;
+			}
+		}
+	}
+	
+	YDBCKRecordInfo *recordInfo = [[YDBCKRecordInfo alloc] init];
+	recordInfo.databaseIdentifier = recordTableInfo.databaseIdentifier;
+	
+	__unsafe_unretained YapDatabaseCloudKitRecordHandler *recordHandler = parentConnection->parent->recordHandler;
+	
+	if (recordHandler->blockType == YapDatabaseBlockTypeWithKey)
+	{
+		__unsafe_unretained YapDatabaseCloudKitRecordWithKeyBlock recordBlock =
+		  (YapDatabaseCloudKitRecordWithKeyBlock)recordHandler->block;
+		
+		recordBlock(databaseTransaction, &record, recordInfo, collection, key);
+	}
+	else if (recordHandler->blockType == YapDatabaseBlockTypeWithObject)
+	{
+		__unsafe_unretained YapDatabaseCloudKitRecordWithObjectBlock recordBlock =
+		  (YapDatabaseCloudKitRecordWithObjectBlock)recordHandler->block;
+		
+		recordBlock(databaseTransaction, &record, recordInfo, collection, key, object);
+	}
+	else if (recordHandler->blockType == YapDatabaseBlockTypeWithMetadata)
+	{
+		__unsafe_unretained YapDatabaseCloudKitRecordWithMetadataBlock recordBlock =
+		  (YapDatabaseCloudKitRecordWithMetadataBlock)recordHandler->block;
+		
+		recordBlock(databaseTransaction, &record, recordInfo, collection, key, metadata);
+	}
+	else // if (recordHandler->blockType == YapDatabaseBlockTypeWithRow)
+	{
+		__unsafe_unretained YapDatabaseCloudKitRecordWithRowBlock recordBlock =
+		  (YapDatabaseCloudKitRecordWithRowBlock)recordHandler->block;
+		
+		recordBlock(databaseTransaction, &record, recordInfo, collection, key, object, metadata);
+	}
+	
+	// Figure if anything changed, and schedule updates to the table(s) accordingly
+	
+	[self processRecord:record recordInfo:recordInfo
+	                    preCalculatedHash:nil
+	                             forRowid:rowid
+	             withPrevMappingTableInfo:mappingTableInfo
+	                  prevRecordTableInfo:recordTableInfo
+	                                flags:0];
+}
+
+/**
+ * YapDatabase extension hook.
+ * This method is invoked by a YapDatabaseReadWriteTransaction as a post-operation-hook.
+**/
+- (void)didInsertObject:(id)object
+       forCollectionKey:(YapCollectionKey *)collectionKey
+           withMetadata:(id)metadata
+                  rowid:(int64_t)rowid
+{
+	YDBLogAutoTrace();
 	
 	// Check for pending attach request
 	
@@ -3203,72 +3315,27 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 		return;
 	}
 	
-	// Invoke the recordBlock.
+	// Otherwise process row as usual
 	
-	YDBCKRecordInfo *recordInfo = [[YDBCKRecordInfo alloc] init];
-	CKRecord *record = nil;
-	
-	YapDatabaseCloudKitBlockType recordBlockType = parentConnection->parent->recordBlockType;
-	
-	if (recordBlockType == YapDatabaseCloudKitBlockTypeWithKey)
-	{
-		__unsafe_unretained YapDatabaseCloudKitRecordWithKeyBlock recordBlock =
-		  (YapDatabaseCloudKitRecordWithKeyBlock)parentConnection->parent->recordBlock;
-		
-		recordBlock(&record, recordInfo, collection, key);
-	}
-	else if (recordBlockType == YapDatabaseCloudKitBlockTypeWithObject)
-	{
-		__unsafe_unretained YapDatabaseCloudKitRecordWithObjectBlock recordBlock =
-		  (YapDatabaseCloudKitRecordWithObjectBlock)parentConnection->parent->recordBlock;
-		
-		recordBlock(&record, recordInfo, collection, key, object);
-	}
-	else if (recordBlockType == YapDatabaseCloudKitBlockTypeWithMetadata)
-	{
-		__unsafe_unretained YapDatabaseCloudKitRecordWithMetadataBlock recordBlock =
-		  (YapDatabaseCloudKitRecordWithMetadataBlock)parentConnection->parent->recordBlock;
-		
-		recordBlock(&record, recordInfo, collection, key, metadata);
-	}
-	else // if (recordBlockType == YapDatabaseCloudKitBlockTypeWithRow)
-	{
-		__unsafe_unretained YapDatabaseCloudKitRecordWithRowBlock recordBlock =
-		  (YapDatabaseCloudKitRecordWithRowBlock)parentConnection->parent->recordBlock;
-		
-		recordBlock(&record, recordInfo, collection, key, object, metadata);
-	}
-	
-	// Figure if anything changed, and schedule updates to the table(s) accordingly
-	
-	[self processRecord:record recordInfo:recordInfo
-	                    preCalculatedHash:nil
-	                             forRowid:rowid
-	             withPrevMappingTableInfo:nil
-	                  prevRecordTableInfo:nil
-	                                flags:0];
+	[self _handleChangeWithRowid:rowid
+	               collectionKey:collectionKey
+	                      object:object
+	                    metadata:metadata
+	                    isInsert:YES];
 }
 
 /**
  * YapDatabase extension hook.
  * This method is invoked by a YapDatabaseReadWriteTransaction as a post-operation-hook.
 **/
-- (void)handleUpdateObject:(id)object
-          forCollectionKey:(YapCollectionKey *)collectionKey
-              withMetadata:(id)metadata
-                     rowid:(int64_t)rowid
+- (void)didUpdateObject:(id)object
+       forCollectionKey:(YapCollectionKey *)collectionKey
+           withMetadata:(id)metadata
+                  rowid:(int64_t)rowid
 {
 	YDBLogAutoTrace();
 	
-	__unsafe_unretained NSString *collection = collectionKey.collection;
-	__unsafe_unretained NSString *key = collectionKey.key;
-	
-	YapWhitelistBlacklist *allowedCollections = parentConnection->parent->options.allowedCollections;
-	
-	if (allowedCollections && ![allowedCollections isAllowed:collection])
-	{
-		return;
-	}
+	// Check for possible MidMerge
 	
 	if (rowidsInMidMerge && [rowidsInMidMerge containsObject:@(rowid)])
 	{
@@ -3276,95 +3343,34 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 		return;
 	}
 	
-	// Fetch current mappings & record information for the given rowid.
+	// Otherwise process row as usual
 	
-	id <YDBCKMappingTableInfo> mappingTableInfo = nil;
-	id <YDBCKRecordTableInfo> recordTableInfo = nil;
+	__unsafe_unretained YapDatabaseCloudKitRecordHandler *recordHandler = parentConnection->parent->recordHandler;
 	
-	mappingTableInfo = [self mappingTableInfoForRowid:rowid cacheResult:YES];
-	if (mappingTableInfo) {
-		recordTableInfo = [self recordTableInfoForHash:mappingTableInfo.current_recordTable_hash cacheResult:YES];
-	}
+	YapDatabaseBlockInvoke blockInvokeBitMask = YapDatabaseBlockInvokeIfObjectModified |
+	                                            YapDatabaseBlockInvokeIfMetadataModified;
 	
-	CKRecord *record = nil;
-	if ([recordTableInfo isKindOfClass:[YDBCKCleanRecordTableInfo class]])
+	if (!(recordHandler->blockInvokeOptions & blockInvokeBitMask))
 	{
-		__unsafe_unretained YDBCKCleanRecordTableInfo *cleanRecordTableInfo =
-		  (YDBCKCleanRecordTableInfo *)recordTableInfo;
-		
-		record = [cleanRecordTableInfo.record safeCopy];
-	}
-	else if ([recordTableInfo isKindOfClass:[YDBCKDirtyRecordTableInfo class]])
-	{
-		__unsafe_unretained YDBCKDirtyRecordTableInfo *dirtyRecordTableInfo =
-		  (YDBCKDirtyRecordTableInfo *)recordTableInfo;
-		
-		record = dirtyRecordTableInfo.dirty_record;
+		return;
 	}
 	
-	YDBCKRecordInfo *recordInfo = [[YDBCKRecordInfo alloc] init];
-	recordInfo.databaseIdentifier = recordTableInfo.databaseIdentifier;
-	
-	// Invoke the recordBlock.
-	
-	YapDatabaseCloudKitBlockType recordBlockType = parentConnection->parent->recordBlockType;
-	
-	if (recordBlockType == YapDatabaseCloudKitBlockTypeWithKey)
-	{
-		__unsafe_unretained YapDatabaseCloudKitRecordWithKeyBlock recordBlock =
-		  (YapDatabaseCloudKitRecordWithKeyBlock)parentConnection->parent->recordBlock;
-		
-		recordBlock(&record, recordInfo, collection, key);
-	}
-	else if (recordBlockType == YapDatabaseCloudKitBlockTypeWithObject)
-	{
-		__unsafe_unretained YapDatabaseCloudKitRecordWithObjectBlock recordBlock =
-		  (YapDatabaseCloudKitRecordWithObjectBlock)parentConnection->parent->recordBlock;
-		
-		recordBlock(&record, recordInfo, collection, key, object);
-	}
-	else if (recordBlockType == YapDatabaseCloudKitBlockTypeWithMetadata)
-	{
-		__unsafe_unretained YapDatabaseCloudKitRecordWithMetadataBlock recordBlock =
-		  (YapDatabaseCloudKitRecordWithMetadataBlock)parentConnection->parent->recordBlock;
-		
-		recordBlock(&record, recordInfo, collection, key, metadata);
-	}
-	else // if (recordBlockType == YapDatabaseCloudKitBlockTypeWithRow)
-	{
-		__unsafe_unretained YapDatabaseCloudKitRecordWithRowBlock recordBlock =
-		  (YapDatabaseCloudKitRecordWithRowBlock)parentConnection->parent->recordBlock;
-		
-		recordBlock(&record, recordInfo, collection, key, object, metadata);
-	}
-	
-	// Figure if anything changed, and schedule updates to the table(s) accordingly
-	
-	[self processRecord:record recordInfo:recordInfo
-	                    preCalculatedHash:nil
-	                             forRowid:rowid
-	             withPrevMappingTableInfo:mappingTableInfo
-	                  prevRecordTableInfo:recordTableInfo
-	                                flags:0];
+	[self _handleChangeWithRowid:rowid
+	               collectionKey:collectionKey
+	                      object:object
+	                    metadata:metadata
+	                    isInsert:NO];
 }
 
 /**
  * YapDatabase extension hook.
  * This method is invoked by a YapDatabaseReadWriteTransaction as a post-operation-hook.
 **/
-- (void)handleReplaceObject:(id)object forCollectionKey:(YapCollectionKey *)collectionKey withRowid:(int64_t)rowid
+- (void)didReplaceObject:(id)object forCollectionKey:(YapCollectionKey *)collectionKey withRowid:(int64_t)rowid
 {
 	YDBLogAutoTrace();
 	
-	__unsafe_unretained NSString *collection = collectionKey.collection;
-	__unsafe_unretained NSString *key = collectionKey.key;
-	
-	YapWhitelistBlacklist *allowedCollections = parentConnection->parent->options.allowedCollections;
-	
-	if (allowedCollections && ![allowedCollections isAllowed:collection])
-	{
-		return;
-	}
+	// Check for possible MidMerge
 	
 	if (rowidsInMidMerge && [rowidsInMidMerge containsObject:@(rowid)])
 	{
@@ -3372,92 +3378,39 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 		return;
 	}
 	
-	YapDatabaseCloudKitBlockType recordBlockType = parentConnection->parent->recordBlockType;
+	// Otherwise process row as usual
 	
-	if (recordBlockType == YapDatabaseCloudKitBlockTypeWithKey     ||
-	    recordBlockType == YapDatabaseCloudKitBlockTypeWithMetadata )
+	__unsafe_unretained YapDatabaseCloudKitRecordHandler *recordHandler = parentConnection->parent->recordHandler;
+	
+	YapDatabaseBlockInvoke blockInvokeBitMask = YapDatabaseBlockInvokeIfObjectModified;
+	
+	if (!(recordHandler->blockInvokeOptions & blockInvokeBitMask))
 	{
-		// Nothing to do.
-		// The collection/key/metadata hasn't changed, so the CKRecord hasn't changed.
-		
 		return;
 	}
 	
-	// Fetch current mappings & record information for the given rowid.
-	
-	id <YDBCKMappingTableInfo> mappingTableInfo = nil;
-	id <YDBCKRecordTableInfo> recordTableInfo = nil;
-	
-	mappingTableInfo = [self mappingTableInfoForRowid:rowid cacheResult:YES];
-	if (mappingTableInfo) {
-		recordTableInfo = [self recordTableInfoForHash:mappingTableInfo.current_recordTable_hash cacheResult:YES];
-	}
-	
-	CKRecord *record = nil;
-	if ([recordTableInfo isKindOfClass:[YDBCKCleanRecordTableInfo class]])
+	id metadata = nil;
+	if (recordHandler->blockType & YapDatabaseBlockType_MetadataFlag)
 	{
-		__unsafe_unretained YDBCKCleanRecordTableInfo *cleanRecordTableInfo =
-		(YDBCKCleanRecordTableInfo *)recordTableInfo;
-		
-		record = [cleanRecordTableInfo.record safeCopy];
-	}
-	else if ([recordTableInfo isKindOfClass:[YDBCKDirtyRecordTableInfo class]])
-	{
-		__unsafe_unretained YDBCKDirtyRecordTableInfo *dirtyRecordTableInfo =
-		(YDBCKDirtyRecordTableInfo *)recordTableInfo;
-		
-		record = dirtyRecordTableInfo.dirty_record;
+		metadata = [databaseTransaction metadataForCollectionKey:collectionKey withRowid:rowid];
 	}
 	
-	YDBCKRecordInfo *recordInfo = [[YDBCKRecordInfo alloc] init];
-	recordInfo.databaseIdentifier = recordTableInfo.databaseIdentifier;
-	
-	// Invoke the recordBlock.
-	
-	if (recordBlockType == YapDatabaseCloudKitBlockTypeWithObject)
-	{
-		__unsafe_unretained YapDatabaseCloudKitRecordWithObjectBlock recordBlock =
-		  (YapDatabaseCloudKitRecordWithObjectBlock)parentConnection->parent->recordBlock;
-		
-		recordBlock(&record, recordInfo, collection, key, object);
-	}
-	else // if (recordBlockType == YapDatabaseCloudKitBlockTypeWithRow)
-	{
-		__unsafe_unretained YapDatabaseCloudKitRecordWithRowBlock recordBlock =
-		  (YapDatabaseCloudKitRecordWithRowBlock)parentConnection->parent->recordBlock;
-		
-		id metadata = [databaseTransaction metadataForCollectionKey:collectionKey withRowid:rowid];
-		
-		recordBlock(&record, recordInfo, collection, key, object, metadata);
-	}
-	
-	// Figure if anything changed, and schedule updates to the table(s) accordingly
-	
-	[self processRecord:record recordInfo:recordInfo
-	                    preCalculatedHash:nil
-	                             forRowid:rowid
-	             withPrevMappingTableInfo:mappingTableInfo
-	                  prevRecordTableInfo:recordTableInfo
-	                                flags:0];
+	[self _handleChangeWithRowid:rowid
+	               collectionKey:collectionKey
+	                      object:object
+	                    metadata:metadata
+	                    isInsert:NO];
 }
 
 /**
  * YapDatabase extension hook.
  * This method is invoked by a YapDatabaseReadWriteTransaction as a post-operation-hook.
 **/
-- (void)handleReplaceMetadata:(id)metadata forCollectionKey:(YapCollectionKey *)collectionKey withRowid:(int64_t)rowid
+- (void)didReplaceMetadata:(id)metadata forCollectionKey:(YapCollectionKey *)collectionKey withRowid:(int64_t)rowid
 {
 	YDBLogAutoTrace();
 	
-	__unsafe_unretained NSString *collection = collectionKey.collection;
-	__unsafe_unretained NSString *key = collectionKey.key;
-	
-	YapWhitelistBlacklist *allowedCollections = parentConnection->parent->options.allowedCollections;
-	
-	if (allowedCollections && ![allowedCollections isAllowed:collection])
-	{
-		return;
-	}
+	// Check for possible MidMerge
 	
 	if (rowidsInMidMerge && [rowidsInMidMerge containsObject:@(rowid)])
 	{
@@ -3465,106 +3418,168 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 		return;
 	}
 	
-	YapDatabaseCloudKitBlockType recordBlockType = parentConnection->parent->recordBlockType;
+	// Otherwise process row as usual
 	
-	if (recordBlockType == YapDatabaseCloudKitBlockTypeWithKey   ||
-		recordBlockType == YapDatabaseCloudKitBlockTypeWithObject )
+	__unsafe_unretained YapDatabaseCloudKitRecordHandler *recordHandler = parentConnection->parent->recordHandler;
+	
+	YapDatabaseBlockInvoke blockInvokeBitMask = YapDatabaseBlockInvokeIfMetadataModified;
+	
+	if (!(recordHandler->blockInvokeOptions & blockInvokeBitMask))
 	{
-		// Nothing to do.
-		// The collection/key/object hasn't changed, so the CKRecord hasn't changed.
-		
 		return;
 	}
 	
-	// Fetch current mappings & record information for the given rowid.
-	
-	id <YDBCKMappingTableInfo> mappingTableInfo = nil;
-	id <YDBCKRecordTableInfo> recordTableInfo = nil;
-	
-	mappingTableInfo = [self mappingTableInfoForRowid:rowid cacheResult:YES];
-	if (mappingTableInfo) {
-		recordTableInfo = [self recordTableInfoForHash:mappingTableInfo.current_recordTable_hash cacheResult:YES];
-	}
-	
-	CKRecord *record = nil;
-	if ([recordTableInfo isKindOfClass:[YDBCKCleanRecordTableInfo class]])
+	id object = nil;
+	if (recordHandler->blockType & YapDatabaseBlockType_ObjectFlag)
 	{
-		__unsafe_unretained YDBCKCleanRecordTableInfo *cleanRecordTableInfo =
-		(YDBCKCleanRecordTableInfo *)recordTableInfo;
-		
-		record = [cleanRecordTableInfo.record safeCopy];
-	}
-	else if ([recordTableInfo isKindOfClass:[YDBCKDirtyRecordTableInfo class]])
-	{
-		__unsafe_unretained YDBCKDirtyRecordTableInfo *dirtyRecordTableInfo =
-		(YDBCKDirtyRecordTableInfo *)recordTableInfo;
-		
-		record = dirtyRecordTableInfo.dirty_record;
+		object = [databaseTransaction objectForCollectionKey:collectionKey withRowid:rowid];
 	}
 	
-	YDBCKRecordInfo *recordInfo = [[YDBCKRecordInfo alloc] init];
-	recordInfo.databaseIdentifier = recordTableInfo.databaseIdentifier;
-	
-	// Invoke the recordBlock.
-	
-	if (recordBlockType == YapDatabaseCloudKitBlockTypeWithMetadata)
-	{
-		__unsafe_unretained YapDatabaseCloudKitRecordWithMetadataBlock recordBlock =
-		  (YapDatabaseCloudKitRecordWithMetadataBlock)parentConnection->parent->recordBlock;
-		
-		recordBlock(&record, recordInfo, collection, key, metadata);
-	}
-	else // if (recordBlockType == YapDatabaseCloudKitBlockTypeWithRow)
-	{
-		__unsafe_unretained YapDatabaseCloudKitRecordWithRowBlock recordBlock =
-		  (YapDatabaseCloudKitRecordWithRowBlock)parentConnection->parent->recordBlock;
-		
-		id object = [databaseTransaction objectForCollectionKey:collectionKey withRowid:rowid];
-		
-		recordBlock(&record, recordInfo, collection, key, object, metadata);
-	}
-	
-	// Figure if anything changed, and schedule updates to the table(s) accordingly
-	
-	[self processRecord:record recordInfo:recordInfo
-	                    preCalculatedHash:nil
-	                             forRowid:rowid
-	             withPrevMappingTableInfo:mappingTableInfo
-	                  prevRecordTableInfo:recordTableInfo
-	                                flags:0];
+	[self _handleChangeWithRowid:rowid
+	               collectionKey:collectionKey
+	                      object:object
+	                    metadata:metadata
+	                    isInsert:NO];
 }
 
 /**
  * YapDatabase extension hook.
  * This method is invoked by a YapDatabaseReadWriteTransaction as a post-operation-hook.
 **/
-- (void)handleTouchObjectForCollectionKey:(YapCollectionKey *)collectionKey withRowid:(int64_t)rowid
+- (void)didTouchObjectForCollectionKey:(YapCollectionKey *)collectionKey withRowid:(int64_t)rowid
 {
-	// Nothing to do here.
-	// "Touch" is generally meant for local operations.
-	//
-	// We may add an explicit "remote" touch (declared in YapDatabaseCloudKitTransaction.h)
-	// in the future if there seems to be a need for it.
+	// Check for possible MidMerge
+	
+	if (rowidsInMidMerge && [rowidsInMidMerge containsObject:@(rowid)])
+	{
+		// Ignore - we're in the middle of a merge block
+		return;
+	}
+	
+	// Otherwise process row as usual
+	
+	__unsafe_unretained YapDatabaseCloudKitRecordHandler *recordHandler = parentConnection->parent->recordHandler;
+	
+	YapDatabaseBlockInvoke blockInvokeBitMask = YapDatabaseBlockInvokeIfObjectTouched;
+	
+	if (!(recordHandler->blockInvokeOptions & blockInvokeBitMask))
+	{
+		return;
+	}
+	
+	id object = nil;
+	if (recordHandler->blockType & YapDatabaseBlockType_ObjectFlag)
+	{
+		object = [databaseTransaction objectForCollectionKey:collectionKey withRowid:rowid];
+	}
+	
+	id metadata = nil;
+	if (recordHandler->blockType & YapDatabaseBlockType_MetadataFlag)
+	{
+		metadata = [databaseTransaction metadataForCollectionKey:collectionKey withRowid:rowid];
+	}
+	
+	[self _handleChangeWithRowid:rowid
+	               collectionKey:collectionKey
+	                      object:object
+	                    metadata:metadata
+	                    isInsert:NO];
 }
 
 /**
  * YapDatabase extension hook.
  * This method is invoked by a YapDatabaseReadWriteTransaction as a post-operation-hook.
 **/
-- (void)handleTouchMetadataForCollectionKey:(YapCollectionKey *)collectionKey withRowid:(int64_t)rowid
+- (void)didTouchMetadataForCollectionKey:(YapCollectionKey *)collectionKey withRowid:(int64_t)rowid
 {
-	// Nothing to do here.
-	// "Touch" is generally meant for local operations.
-	//
-	// We may add an explicit "remote" touch (declared in YapDatabaseCloudKitTransaction.h)
-	// in the future if there seems to be a need for it.
+	// Check for possible MidMerge
+	
+	if (rowidsInMidMerge && [rowidsInMidMerge containsObject:@(rowid)])
+	{
+		// Ignore - we're in the middle of a merge block
+		return;
+	}
+	
+	// Otherwise process row as usual
+	
+	__unsafe_unretained YapDatabaseCloudKitRecordHandler *recordHandler = parentConnection->parent->recordHandler;
+	
+	YapDatabaseBlockInvoke blockInvokeBitMask = YapDatabaseBlockInvokeIfMetadataTouched;
+	
+	if (!(recordHandler->blockInvokeOptions & blockInvokeBitMask))
+	{
+		return;
+	}
+	
+	id object = nil;
+	if (recordHandler->blockType & YapDatabaseBlockType_ObjectFlag)
+	{
+		object = [databaseTransaction objectForCollectionKey:collectionKey withRowid:rowid];
+	}
+	
+	id metadata = nil;
+	if (recordHandler->blockType & YapDatabaseBlockType_MetadataFlag)
+	{
+		metadata = [databaseTransaction metadataForCollectionKey:collectionKey withRowid:rowid];
+	}
+	
+	[self _handleChangeWithRowid:rowid
+	               collectionKey:collectionKey
+	                      object:object
+	                    metadata:metadata
+	                    isInsert:NO];
 }
 
 /**
  * YapDatabase extension hook.
  * This method is invoked by a YapDatabaseReadWriteTransaction as a post-operation-hook.
 **/
-- (void)handleRemoveObjectForCollectionKey:(YapCollectionKey *)collectionKey withRowid:(int64_t)rowid
+- (void)didTouchRowForCollectionKey:(YapCollectionKey *)collectionKey withRowid:(int64_t)rowid
+{
+	// Check for possible MidMerge
+	
+	if (rowidsInMidMerge && [rowidsInMidMerge containsObject:@(rowid)])
+	{
+		// Ignore - we're in the middle of a merge block
+		return;
+	}
+	
+	// Otherwise process row as usual
+	
+	__unsafe_unretained YapDatabaseCloudKitRecordHandler *recordHandler = parentConnection->parent->recordHandler;
+	
+	YapDatabaseBlockInvoke blockInvokeBitMask = YapDatabaseBlockInvokeIfObjectTouched |
+	                                            YapDatabaseBlockInvokeIfMetadataTouched;
+	
+	if (!(recordHandler->blockInvokeOptions & blockInvokeBitMask))
+	{
+		return;
+	}
+	
+	id object = nil;
+	if (recordHandler->blockType & YapDatabaseBlockType_ObjectFlag)
+	{
+		object = [databaseTransaction objectForCollectionKey:collectionKey withRowid:rowid];
+	}
+	
+	id metadata = nil;
+	if (recordHandler->blockType & YapDatabaseBlockType_MetadataFlag)
+	{
+		metadata = [databaseTransaction metadataForCollectionKey:collectionKey withRowid:rowid];
+	}
+	
+	[self _handleChangeWithRowid:rowid
+	               collectionKey:collectionKey
+	                      object:object
+	                    metadata:metadata
+	                    isInsert:NO];
+}
+
+/**
+ * YapDatabase extension hook.
+ * This method is invoked by a YapDatabaseReadWriteTransaction as a post-operation-hook.
+**/
+- (void)didRemoveObjectForCollectionKey:(YapCollectionKey *)collectionKey withRowid:(int64_t)rowid
 {
 	YDBLogAutoTrace();
 	
@@ -3590,7 +3605,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
  * YapDatabase extension hook.
  * This method is invoked by a YapDatabaseReadWriteTransaction as a post-operation-hook.
 **/
-- (void)handleRemoveObjectsForKeys:(NSArray *)keys inCollection:(NSString *)collection withRowids:(NSArray *)rowids
+- (void)didRemoveObjectsForKeys:(NSArray *)keys inCollection:(NSString *)collection withRowids:(NSArray *)rowids
 {
 	YDBLogAutoTrace();
 	
@@ -3632,7 +3647,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
  * YapDatabase extension hook.
  * This method is invoked by a YapDatabaseReadWriteTransaction as a post-operation-hook.
 **/
-- (void)handleRemoveAllObjectsInAllCollections
+- (void)didRemoveAllObjectsInAllCollections
 {
 	YDBLogAutoTrace();
 	
@@ -3653,63 +3668,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /**
- * This method is used to associate an existing CKRecord with a row in the database.
- * There are two primary use cases for this method.
- *
- * 1. To associate a discovered/pulled CKRecord with a row in the database before you insert it the row.
- *    In particular, for the following situation:
- *
- *    - You're pulling record changes from the server via CKFetchRecordChangesOperation (or similar).
- *    - You discover a record that was inserted by another device.
- *    - You need to add a corresponding row to the database,
- *      but you also need to inform the YapDatabaseCloudKit extension about the existing record,
- *      so it won't bother invoking the recordHandler, or attempting to upload the existing record.
- *    - So you invoke this method FIRST.
- *    - And THEN you insert the corresponding object into the database via the
- *      normal setObject:forKey:inCollection: method (or similar methods).
- *
- * 2. To assist in the migration process when switching to YapDatabaseCloudKit.
- *    In particular, for the following situation:
- *
- *    - You've been handling CloudKit manually (not via YapDatabaseCloudKit).
- *    - And you now want YapDatabaseCloudKit to manage the CKRecord for you.
- *    - So you can invoke this method for an object that already exists in the database,
- *      OR you can invoke this method FIRST, and then insert the new object that you want linked to the record.
- *
- * Thus, this method works as a simple "hand-off" of the CKRecord to the YapDatabaseCloudKit extension.
- *
- * In other words, YapDatbaseCloudKit will write the system fields of the given CKRecord to its internal table,
- * and associate it with the given collection/key tuple.
- *
- * @param record
- *   The CKRecord to associate with the collection/key tuple.
- *
- * @param databaseIdentifer
- *   The identifying string for the CKDatabase.
- *   @see YapDatabaseCloudKitDatabaseIdentifierBlock.
- *
- * @param key
- *   The key of the row to associate the record with.
- *
- * @param collection
- *   The collection of the row to associate the record with.
- *
- * @param shouldUpload
- *   If NO, then the record is simply associated with the collection/key,
- *     and YapDatabaseCloudKit doesn't attempt to push the record to the cloud.
- *   If YES, then the record is associated with the collection/key,
- *     and YapDatabaseCloutKit assumes the given record is dirty and will push the record to the cloud.
- *
- * @return
- *   YES if the record was associated with the given collection/key.
- *   NO if one of the following errors occurred.
- *
- * The following errors will prevent this method from succeeding:
- * - The given record is nil.
- * - The given collection/key is already associated with a different record (so must detach it first).
- *
- * Important: This method only works if within a readWriteTrasaction.
- * Invoking this method from within a read-only transaction will throw an exception.
+ * See header file for documentation.
 **/
 - (BOOL)attachRecord:(CKRecord *)inRecord
   databaseIdentifier:(NSString *)databaseIdentifier
@@ -3795,8 +3754,8 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 	                    preCalculatedHash:hash
 	                             forRowid:rowid
 	             withPrevMappingTableInfo:mappingTableInfo
-	                     prevRecordTableInfo:recordTableInfo
-	                                        flags:flags];
+	                  prevRecordTableInfo:recordTableInfo
+	                                flags:flags];
 	
 	return YES;
 }
@@ -3849,7 +3808,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
  *   Note: If a record was deleted remotely, and the record was associated with MULTIPLE items in the database,
  *   then you should be sure to invoke this method for each attached collection/key.
  *
- * @param shouldUpload
+ * @param shouldUploadDeletion
  *   Whether or not the extension should push a deleted CKRecordID to the cloud.
  *   In use case #2 (from the above discussion, concerning migration), you'd pass NO.
  *   In use case #3 (from the above discussion, concerning moving), you'd pass YES.
@@ -3877,7 +3836,25 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 	int64_t rowid;
 	if (![databaseTransaction getRowid:&rowid forKey:key inCollection:collection])
 	{
-		YDBLogWarn(@"%@ - No row in database with given collection/key: %@, %@", THIS_METHOD, collection, key);
+		// Doesn't exist in the database.
+		// Remove from pendingAttachRequests (if needed), and return.
+		
+		BOOL logWarning = YES;
+		
+		if ([parentConnection->pendingAttachRequests count] > 0)
+		{
+			YapCollectionKey *collectionKey = [[YapCollectionKey alloc] initWithCollection:collection key:key];
+			
+			if ([parentConnection->pendingAttachRequests objectForKey:collectionKey]) {
+				[parentConnection->pendingAttachRequests removeObjectForKey:collectionKey];
+				logWarning = NO;
+			}
+		}
+		
+		if (logWarning) {
+			YDBLogWarn(@"No row in database with given collection/key: %@, %@", collection, key);
+		}
+		
 		return;
 	}
 	
@@ -3935,7 +3912,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 	
 	if (remoteRecord == nil)
 	{
-		YDBLogWarn(@"%@ - Unable to merge a nil record! Did you mean to detach the recordID?", THIS_METHOD);
+		YDBLogWarn(@"Unable to merge a nil record! Did you mean to detach the recordID?");
 		return;
 	}
 	
@@ -4114,6 +4091,13 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 {
 	YDBLogAutoTrace();
 	
+	// Proper API usage check
+	if (!databaseTransaction->isReadWriteTransaction)
+	{
+		@throw [self requiresReadWriteTransactionException:NSStringFromSelector(_cmd)];
+		return NO;
+	}
+	
 	if (record == nil) return NO;
 	
 	NSString *hash = [self hashRecordID:record.recordID databaseIdentifier:databaseIdentifier];
@@ -4239,7 +4223,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 	YDBLogAutoTrace();
 	
 	if (recordID == nil) {
-		return nil;
+		return [NSArray array];
 	}
 	
 	NSString *hash = [self hashRecordID:recordID databaseIdentifier:databaseIdentifier];
@@ -4247,7 +4231,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 	
 	NSUInteger count = rowids.count;
 	if (count == 0) {
-		return nil;
+		return [NSArray array];
 	}
 	
 	NSMutableArray *collectionKeys = [NSMutableArray arrayWithCapacity:count];
@@ -4447,7 +4431,7 @@ static BOOL ClassVersionsAreCompatible(int oldClassVersion, int newClassVersion)
 	}
 	else if (status == SQLITE_ERROR)
 	{
-		YDBLogError(@"%@ - Error executing statement: %d %s", THIS_METHOD,
+		YDBLogError(@"Error executing statement: %d %s",
 					status, sqlite3_errmsg(databaseTransaction->connection->db));
 	}
 	

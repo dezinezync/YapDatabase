@@ -21,8 +21,16 @@
 @synthesize pragmaMMapSize = pragmaMMapSize;
 #ifdef SQLITE_HAS_CODEC
 @synthesize cipherKeyBlock = cipherKeyBlock;
+@synthesize kdfIterNumber = kdfIterNumber;
+@synthesize cipherDefaultkdfIterNumber = cipherDefaultkdfIterNumber;
+@synthesize cipherPageSize = cipherPageSize;
+@synthesize cipherSaltBlock = cipherSaltBlock;
+@synthesize cipherKeySpecBlock = cipherKeySpecBlock;
+@synthesize cipherUnencryptedHeaderLength = cipherUnencryptedHeaderLength;
+@synthesize cipherCompatability = cipherCompatability;
 #endif
 @synthesize aggressiveWALTruncationSize = aggressiveWALTruncationSize;
+@synthesize enableMultiProcessSupport = enableMultiProcessSupport;
 
 - (id)init
 {
@@ -33,7 +41,8 @@
 		pragmaJournalSizeLimit = 0;
 		pragmaPageSize = 0;
 		pragmaMMapSize = 0;
-		aggressiveWALTruncationSize = (1024 * 1024); // 1 MB
+		aggressiveWALTruncationSize = (1024 * 1024 * 4); // 4 MB
+        enableMultiProcessSupport = NO;
 	}
 	return self;
 }
@@ -48,8 +57,16 @@
 	copy->pragmaMMapSize = pragmaMMapSize;
 #ifdef SQLITE_HAS_CODEC
     copy->cipherKeyBlock = cipherKeyBlock;
+    copy->kdfIterNumber = kdfIterNumber;
+    copy->cipherDefaultkdfIterNumber = cipherDefaultkdfIterNumber;
+    copy->cipherPageSize = cipherPageSize;
+    copy->cipherSaltBlock = cipherSaltBlock;
+    copy->cipherKeySpecBlock = cipherKeySpecBlock;
+    copy->cipherUnencryptedHeaderLength = cipherUnencryptedHeaderLength;
+    copy->cipherCompatability = cipherCompatability;
 #endif
 	copy->aggressiveWALTruncationSize = aggressiveWALTruncationSize;
+    copy->enableMultiProcessSupport = enableMultiProcessSupport;
 	
 	return copy;
 }

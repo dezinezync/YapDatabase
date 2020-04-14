@@ -197,14 +197,23 @@ static NSString *const Key_ServerChangeToken   = @"serverChangeToken";
 		NSString *title = @"You're not signed into iCloud.";
 		NSString *message = @"You must be signed into iCloud for syncing to work.";
 		
-		UIAlertView *alertView =
-		  [[UIAlertView alloc] initWithTitle:title
-		                             message:message
-		                            delegate:nil
-		                   cancelButtonTitle:nil
-		                   otherButtonTitles:@"Oops", nil];
+		UIAlertController* alert =
+		  [UIAlertController alertControllerWithTitle:title
+		                                      message:message
+		                               preferredStyle:UIAlertControllerStyleAlert];
 		
-		[alertView show];
+		UIAlertAction* defaultAction =
+		  [UIAlertAction actionWithTitle:@"Oops"
+		                           style:UIAlertActionStyleDefault
+		                         handler:^(UIAlertAction * action)
+		{
+			[alert dismissViewControllerAnimated:YES completion:nil];
+		}];
+		
+		[alert addAction:defaultAction];
+		
+		UIViewController *rootViewController = MyAppDelegate.window.rootViewController;
+		[rootViewController presentViewController:alert animated:YES completion:nil];
 	};
 	
 	if ([NSThread isMainThread])
@@ -220,14 +229,23 @@ static NSString *const Key_ServerChangeToken   = @"serverChangeToken";
 		NSString *title = @"This sample app doesn't support switching iCloud accounts.";
 		NSString *message = @"But, of course, your app will, right ???";
 		
-		UIAlertView *alertView =
-		  [[UIAlertView alloc] initWithTitle:title
-		                             message:message
-		                            delegate:nil
-		                   cancelButtonTitle:nil
-		                   otherButtonTitles:@"Of Course", nil];
+		UIAlertController* alert =
+		  [UIAlertController alertControllerWithTitle:title
+		                                      message:message
+		                               preferredStyle:UIAlertControllerStyleAlert];
 		
-		[alertView show];
+		UIAlertAction* defaultAction =
+		  [UIAlertAction actionWithTitle:@"Of Course"
+		                           style:UIAlertActionStyleDefault
+		                         handler:^(UIAlertAction * action)
+		{
+			[alert dismissViewControllerAnimated:YES completion:nil];
+		}];
+		
+		[alert addAction:defaultAction];
+		
+		UIViewController *rootViewController = MyAppDelegate.window.rootViewController;
+		[rootViewController presentViewController:alert animated:YES completion:nil];
 	};
 	
 	if ([NSThread isMainThread])
@@ -321,7 +339,9 @@ static NSString *const Key_ServerChangeToken   = @"serverChangeToken";
 		
 		dispatch_resume(setupQueue);
 	};
-		
+	
+	modifyRecordZonesOperation.allowsCellularAccess = YES;
+	
 	[[[CKContainer defaultContainer] privateCloudDatabase] addOperation:modifyRecordZonesOperation];
 }
 
@@ -347,10 +367,14 @@ static NSString *const Key_ServerChangeToken   = @"serverChangeToken";
 	}
 	
 	CKRecordZoneID *recordZoneID =
-	  [[CKRecordZoneID alloc] initWithZoneName:CloudKitZoneName ownerName:CKOwnerDefaultName];
+	  [[CKRecordZoneID alloc] initWithZoneName:CloudKitZoneName ownerName:CKCurrentUserDefaultName];
 	
-	CKSubscription *subscription =
-	  [[CKSubscription alloc] initWithZoneID:recordZoneID subscriptionID:CloudKitZoneName options:0];
+	CKNotificationInfo *notificationInfo = [CKNotificationInfo new];
+	notificationInfo.shouldSendContentAvailable = YES;
+	
+	CKRecordZoneSubscription *subscription =
+	  [[CKRecordZoneSubscription alloc] initWithZoneID:recordZoneID subscriptionID:CloudKitZoneName];
+	subscription.notificationInfo = notificationInfo;
 	
 	CKModifySubscriptionsOperation *modifySubscriptionsOperation =
 	  [[CKModifySubscriptionsOperation alloc] initWithSubscriptionsToSave:@[ subscription ]
@@ -385,6 +409,8 @@ static NSString *const Key_ServerChangeToken   = @"serverChangeToken";
 		
 		dispatch_resume(setupQueue);
 	};
+	
+	modifySubscriptionsOperation.allowsCellularAccess = YES;
 	
 	[[[CKContainer defaultContainer] privateCloudDatabase] addOperation:modifySubscriptionsOperation];
 }
@@ -459,16 +485,20 @@ static NSString *const Key_ServerChangeToken   = @"serverChangeToken";
         (void (^)(UIBackgroundFetchResult result, BOOL moreComing))completionHandler
 {
 	CKRecordZoneID *recordZoneID =
-	  [[CKRecordZoneID alloc] initWithZoneName:CloudKitZoneName ownerName:CKOwnerDefaultName];
+	  [[CKRecordZoneID alloc] initWithZoneName:CloudKitZoneName ownerName:CKCurrentUserDefaultName];
 	
-	CKFetchRecordChangesOperation *operation =
-	  [[CKFetchRecordChangesOperation alloc] initWithRecordZoneID:recordZoneID
-	                                    previousServerChangeToken:prevServerChangeToken];
+	CKFetchRecordZoneChangesOptions *zoneOptions = [CKFetchRecordZoneChangesOptions new];
+	zoneOptions.previousServerChangeToken = prevServerChangeToken;
+	
+	CKFetchRecordZoneChangesOperation *operation =
+	  [[CKFetchRecordZoneChangesOperation alloc] initWithRecordZoneIDs:@[recordZoneID]
+	                                             optionsByRecordZoneID:@{recordZoneID: zoneOptions}];
+	operation.fetchAllChanges = NO;
 	
 	__block NSMutableArray *deletedRecordIDs = nil;
 	__block NSMutableArray *changedRecords = nil;
 	
-	operation.recordWithIDWasDeletedBlock = ^(CKRecordID *recordID){
+	operation.recordWithIDWasDeletedBlock = ^(CKRecordID *recordID, NSString *recordType){
 		
 		if (deletedRecordIDs == nil)
 			deletedRecordIDs = [[NSMutableArray alloc] init];
@@ -484,14 +514,14 @@ static NSString *const Key_ServerChangeToken   = @"serverChangeToken";
 		[changedRecords addObject:record];
 	};
 	
-	__weak CKFetchRecordChangesOperation *weakOperation = operation;
-	operation.fetchRecordChangesCompletionBlock =
-	^(CKServerChangeToken *newServerChangeToken, NSData *clientChangeTokenData, NSError *operationError){
+	operation.recordZoneFetchCompletionBlock =
+		^(CKRecordZoneID *recordZoneID, CKServerChangeToken *newServerChangeToken,
+		  NSData *clientChangeTokenData, BOOL moreComing, NSError *operationError)
+	{
+		DDLogVerbose(@"CKFetchRecordZoneChangesOperation.recordZoneFetchCompletionBlock");
 		
-		DDLogVerbose(@"CKFetchRecordChangesOperation.fetchRecordChangesCompletionBlock");
-		
-		DDLogVerbose(@"CKFetchRecordChangesOperation: serverChangeToken: %@", newServerChangeToken);
-		DDLogVerbose(@"CKFetchRecordChangesOperation: clientChangeTokenData: %@", clientChangeTokenData);
+		DDLogVerbose(@"CKFetchRecordZoneChangesOperation: serverChangeToken: %@", newServerChangeToken);
+		DDLogVerbose(@"CKFetchRecordZoneChangesOperation: clientChangeTokenData: %@", clientChangeTokenData);
 		
 		// Edge Case:
 		//
@@ -507,8 +537,6 @@ static NSString *const Key_ServerChangeToken   = @"serverChangeToken";
 		// Which seems non-intuitive to me, but that's what we're getting from the server.
 		// And, in fact, if we don't follow that up with another fetch,
 		// then we fail to properly fetch what's on the server.
-		
-		BOOL moreComing = weakOperation.moreComing;
 		
 		BOOL hasChanges = NO;
 		if (!operationError)
@@ -682,6 +710,8 @@ static NSString *const Key_ServerChangeToken   = @"serverChangeToken";
 		} // end if (hasChanges)
 	};
 	
+	operation.allowsCellularAccess = YES;
+	
 	[[[CKContainer defaultContainer] privateCloudDatabase] addOperation:operation];
 }
 
@@ -740,6 +770,8 @@ static NSString *const Key_ServerChangeToken   = @"serverChangeToken";
 			}];
 		}
 	};
+	
+	operation.allowsCellularAccess = YES;
 	
 	[[[CKContainer defaultContainer] privateCloudDatabase] addOperation:operation];
 }
@@ -850,7 +882,7 @@ static NSString *const Key_ServerChangeToken   = @"serverChangeToken";
 {
 	DDLogInfo(@"%@ - %@", THIS_FILE, THIS_METHOD);
 	
-	YDBCKChangeSet *failedChangeSet = [[MyDatabaseManager.cloudKitExtension pendingChangeSets] firstObject];
+	YDBCKChangeSet *failedChangeSet = [MyDatabaseManager.cloudKitExtension currentChangeSet];
 	NSArray *recordIDs = failedChangeSet.recordIDsToSave;
 	
 	if (recordIDs.count == 0)

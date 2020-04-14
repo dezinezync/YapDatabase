@@ -2,9 +2,6 @@
 #import "YDBCKChangeRecord.h"
 #import "YDBCKRecord.h"
 #import "YapDatabaseCloudKitPrivate.h"
-#if DEBUG
-#import "YapDebugDictionary.h"
-#endif
 
 
 @implementation YDBCKChangeSet
@@ -80,11 +77,7 @@ databaseIdentifier:(NSString *)inDatabaseIdentifier
 	
 	if (modifiedRecords)
 	{
-	#if DEBUG
-		fullCopy->modifiedRecords = [[YapDebugDictionary alloc] initWithDictionary:modifiedRecords copyItems:YES];
-	#else
 		fullCopy->modifiedRecords = [[NSMutableDictionary alloc] initWithDictionary:modifiedRecords copyItems:YES];
-	#endif
 	}
 	
 	return fullCopy;
@@ -104,7 +97,7 @@ databaseIdentifier:(NSString *)inDatabaseIdentifier
 - (NSArray *)recordsToSave
 {
 	NSUInteger modifiedRecordsCount = modifiedRecords.count;
-	if (modifiedRecordsCount == 0) return nil;
+	if (modifiedRecordsCount == 0) return [NSArray array];
 	
 	NSMutableArray *array = [NSMutableArray arrayWithCapacity:modifiedRecordsCount];
 	
@@ -140,7 +133,7 @@ databaseIdentifier:(NSString *)inDatabaseIdentifier
 - (NSArray *)recordIDsToSave
 {
 	NSUInteger modifiedRecordsCount = modifiedRecords.count;
-	if (modifiedRecordsCount == 0) return 0;
+	if (modifiedRecordsCount == 0) return [NSArray array];
 	
 	NSMutableArray *array = [NSMutableArray arrayWithCapacity:modifiedRecordsCount];
 	
@@ -208,13 +201,7 @@ databaseIdentifier:(NSString *)inDatabaseIdentifier
 		NSAssert([modifiedRecordsArray isKindOfClass:[NSArray class]], @"Deserialized object is wrong class");
 	}
 	
-#if DEBUG
-	modifiedRecords = [[YapDebugDictionary alloc] initWithKeyClass:[CKRecordID class]
-	                                                   objectClass:[YDBCKChangeRecord class]
-	                                                      capacity:[modifiedRecordsArray count]];
-#else
 	modifiedRecords = [[NSMutableDictionary alloc] initWithCapacity:[modifiedRecordsArray count]];
-#endif
 	
 	for (YDBCKChangeRecord *changeRecord in modifiedRecordsArray)
 	{
@@ -225,7 +212,7 @@ databaseIdentifier:(NSString *)inDatabaseIdentifier
 	}
 }
 
-- (void)enumerateMissingRecordsWithBlock:(CKRecord* (^)(CKRecordID *recordID, NSArray *changedKeys))block
+- (void)enumerateMissingRecordsWithBlock:(CKRecord* (NS_NOESCAPE^)(CKRecordID *recordID, NSArray *changedKeys))block
 {
 	for (YDBCKChangeRecord *changeRecord in [modifiedRecords objectEnumerator])
 	{

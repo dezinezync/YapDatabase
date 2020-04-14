@@ -9,40 +9,62 @@
 #import "YapDatabaseTransaction.h"
 
 #import "YapCollectionKey.h"
-#import "YapMemoryTable.h"
 
-#import "sqlite3.h"
+#ifdef SQLITE_HAS_CODEC
+  #import <SQLCipher/sqlite3.h>
+#else
+  #import "sqlite3.h"
+#endif
+
+
+typedef NS_OPTIONS(NSUInteger, YapDatabaseConnectionFlushMemoryFlags_Extension) {
+//	YapDatabaseConnectionFlushMemoryFlags_None       = 0,
+//	YapDatabaseConnectionFlushMemoryFlags_Caches     = 1 << 0,
+//	YapDatabaseConnectionFlushMemoryFlags_Statements = 1 << 1,
+//	YapDatabaseConnectionFlushMemoryFlags_Internal   = 1 << 2,
+//	YapDatabaseConnectionFlushMemoryFlags_All        = (YapDatabaseConnectionFlushMemoryFlags_Caches     |
+//																		 YapDatabaseConnectionFlushMemoryFlags_Statements |
+//																		 YapDatabaseConnectionFlushMemoryFlags_Internal   ),
+	
+	/**
+	 * Some extensions may store certain "state" information that was read from the database
+	 * when the extension was being prepared for use. This state information is expected to be
+	 * in-sync with what's on disk.
+	 *
+	 * However, when multiple processes are writing to the database,
+	 * there may be scenarios where the changeset from process A doesn't get propogated to process B.
+	 * If this happens, the `_flushMemoryWithFlags` method is invoked,
+	 * and this flag is passed to warn the extension that it's cached state may be invalid.
+	 */
+	YapDatabaseConnectionFlushMemoryFlags_Extension_State = 1 << 3,
+};
 
 
 @interface YapDatabaseExtension ()
 
-// See YapDatabaseExtension.m for discussion of this method
+/**
+ * See YapDatabaseExtension.m for discussion of these methods.
+ */
+
 + (void)dropTablesForRegisteredName:(NSString *)registeredName
                     withTransaction:(YapDatabaseReadWriteTransaction *)transaction
                       wasPersistent:(BOOL)wasPersistent;
 
-// See YapDatabaseExtension.m for discussion of this method
 + (NSArray *)previousClassNames;
 
-// See YapDatabaseExtension.m for discussion of these method.
-// You should consider them READ-ONLY.
 @property (atomic, copy, readwrite) NSString *registeredName;
 @property (atomic, weak, readwrite) YapDatabase *registeredDatabase;
 
-// See YapDatabaseExtension.m for discussion of this method
-- (BOOL)supportsDatabase:(YapDatabase *)database withRegisteredExtensions:(NSDictionary *)registeredExtensions;
-
-// See YapDatabaseExtension.m for discussion of this method
 - (NSSet *)dependencies;
-
-// See YapDatabaseExtension.m for discussion of this method
 - (BOOL)isPersistent;
 
-// See YapDatabaseExtension.m for discussion of this method
+- (BOOL)supportsDatabaseWithRegisteredExtensions:(NSDictionary<NSString*, YapDatabaseExtension*> *)registeredExtensions;
+- (void)didRegisterExtension;
+
 - (YapDatabaseExtensionConnection *)newConnection:(YapDatabaseConnection *)databaseConnection;
 
-// See YapDatabaseExtension.m for discussion of this method
 - (void)processChangeset:(NSDictionary *)changeset;
+- (void)noteCommittedChangeset:(NSDictionary *)changeset registeredName:(NSString *)extName;
 
 @end
 
@@ -52,23 +74,24 @@
 
 @interface YapDatabaseExtensionConnection ()
 
-// See YapDatabaseExtensionConnection.m for discussion of this method
+/**
+ * See YapDatabaseExtensionConnection.m for discussion of these methods
+ */
+
 - (YapDatabaseExtension *)extension;
 
-// See YapDatabaseExtensionConnection.m for discussion of this method
 - (id)newReadTransaction:(YapDatabaseReadTransaction *)databaseTransaction;
 - (id)newReadWriteTransaction:(YapDatabaseReadWriteTransaction *)databaseTransaction;
 
-// See YapDatabaseExtensionConnection.m for discussion of this method
 - (void)_flushMemoryWithFlags:(YapDatabaseConnectionFlushMemoryFlags)flags;
 
-// See YapDatabaseExtensionConnection.m for discussion of this method
 - (void)getInternalChangeset:(NSMutableDictionary **)internalPtr
            externalChangeset:(NSMutableDictionary **)externalPtr
               hasDiskChanges:(BOOL *)hasDiskChangesPtr;
 
-// See YapDatabaseExtensionConnection.m for discussion of this method
+
 - (void)processChangeset:(NSDictionary *)changeset;
+- (void)noteCommittedChangeset:(NSDictionary *)changeset registeredName:(NSString *)registeredName;
 
 @end
 
@@ -78,92 +101,87 @@
 
 @interface YapDatabaseExtensionTransaction ()
 
-// See YapDatabaseExtensionTransaction.m for discussion of this method
+/**
+ * See YapDatabaseExtensionTransaction.m for discussion of these methods
+ */
+
 - (YapDatabaseExtensionConnection *)extensionConnection;
 - (YapDatabaseReadTransaction *)databaseTransaction;
 
-// See YapDatabaseExtensionTransaction.m for discussion of this method
 - (BOOL)createIfNeeded;
-
-// See YapDatabaseExtensionTransaction.m for discussion of this method
 - (BOOL)prepareIfNeeded;
 
-// See YapDatabaseExtensionTransaction.m for discussion of this method
 - (BOOL)flushPendingChangesToMainDatabaseTable;
-
-// See YapDatabaseExtensionTransaction.m for discussion of this method
 - (void)flushPendingChangesToExtensionTables;
 
-// See YapDatabaseExtensionTransaction.m for discussion of this method
 - (void)didCommitTransaction;
-
-// See YapDatabaseExtensionTransaction.m for discussion of this method
 - (void)didRollbackTransaction;
 
 #pragma mark Hooks
 
 /**
  * See YapDatabaseExtensionTransaction.m for discussion of these methods
-**/
+ */
 
-- (void)handleInsertObject:(id)object
+- (void)didInsertObject:(id)object
+       forCollectionKey:(YapCollectionKey *)collectionKey
+           withMetadata:(id)metadata
+                  rowid:(int64_t)rowid;
+
+- (void)didUpdateObject:(id)object
+       forCollectionKey:(YapCollectionKey *)collectionKey
+           withMetadata:(id)metadata
+                  rowid:(int64_t)rowid;
+
+- (void)didReplaceObject:(id)object
+        forCollectionKey:(YapCollectionKey *)collectionKey
+               withRowid:(int64_t)rowid;
+
+- (void)didReplaceMetadata:(id)metadata
           forCollectionKey:(YapCollectionKey *)collectionKey
-              withMetadata:(id)metadata
-                     rowid:(int64_t)rowid;
+                 withRowid:(int64_t)rowid;
 
-- (void)handleUpdateObject:(id)object
-          forCollectionKey:(YapCollectionKey *)collectionKey
-              withMetadata:(id)metadata
-                     rowid:(int64_t)rowid;
+- (void)didTouchObjectForCollectionKey:(YapCollectionKey *)collectionKey withRowid:(int64_t)rowid;
+- (void)didTouchMetadataForCollectionKey:(YapCollectionKey *)collectionKey withRowid:(int64_t)rowid;
+- (void)didTouchRowForCollectionKey:(YapCollectionKey *)collectionKey withRowid:(int64_t)rowid;
 
-- (void)handleReplaceObject:(id)object
-           forCollectionKey:(YapCollectionKey *)collectionKey
-                  withRowid:(int64_t)rowid;
+- (void)didRemoveObjectForCollectionKey:(YapCollectionKey *)collectionKey withRowid:(int64_t)rowid;
 
-- (void)handleReplaceMetadata:(id)metadata
-             forCollectionKey:(YapCollectionKey *)collectionKey
-                    withRowid:(int64_t)rowid;
+- (void)didRemoveObjectsForKeys:(NSArray *)keys inCollection:(NSString *)collection withRowids:(NSArray *)rowids;
 
-- (void)handleTouchObjectForCollectionKey:(YapCollectionKey *)collectionKey withRowid:(int64_t)rowid;
-- (void)handleTouchMetadataForCollectionKey:(YapCollectionKey *)collectionKey withRowid:(int64_t)rowid;
-
-- (void)handleRemoveObjectForCollectionKey:(YapCollectionKey *)collectionKey withRowid:(int64_t)rowid;
-
-- (void)handleRemoveObjectsForKeys:(NSArray *)keys inCollection:(NSString *)collection withRowids:(NSArray *)rowids;
-
-- (void)handleRemoveAllObjectsInAllCollections;
+- (void)didRemoveAllObjectsInAllCollections;
 
 // Pre-op versions
 
-- (void)handleWillInsertObject:(id)object
-          forCollectionKey:(YapCollectionKey *)collectionKey
-              withMetadata:(id)metadata;
+- (void)willInsertObject:(id)object
+        forCollectionKey:(YapCollectionKey *)collectionKey
+            withMetadata:(id)metadata;
 
-- (void)handleWillUpdateObject:(id)object
-          forCollectionKey:(YapCollectionKey *)collectionKey
-              withMetadata:(id)metadata
-                     rowid:(int64_t)rowid;
+- (void)willUpdateObject:(id)object
+        forCollectionKey:(YapCollectionKey *)collectionKey
+            withMetadata:(id)metadata
+                   rowid:(int64_t)rowid;
 
-- (void)handleWillReplaceObject:(id)object
+- (void)willReplaceObject:(id)object
+         forCollectionKey:(YapCollectionKey *)collectionKey
+                withRowid:(int64_t)rowid;
+
+- (void)willReplaceMetadata:(id)metadata
            forCollectionKey:(YapCollectionKey *)collectionKey
                   withRowid:(int64_t)rowid;
 
-- (void)handleWillReplaceMetadata:(id)metadata
-             forCollectionKey:(YapCollectionKey *)collectionKey
-                    withRowid:(int64_t)rowid;
+- (void)willRemoveObjectForCollectionKey:(YapCollectionKey *)collectionKey withRowid:(int64_t)rowid;
 
-- (void)handleWillRemoveObjectForCollectionKey:(YapCollectionKey *)collectionKey withRowid:(int64_t)rowid;
+- (void)willRemoveObjectsForKeys:(NSArray *)keys inCollection:(NSString *)collection withRowids:(NSArray *)rowids;
 
-- (void)handleWillRemoveObjectsForKeys:(NSArray *)keys inCollection:(NSString *)collection withRowids:(NSArray *)rowids;
-
-- (void)handleWillRemoveAllObjectsInAllCollections;
+- (void)willRemoveAllObjectsInAllCollections;
 
 
 #pragma mark Configuration Values
 
 /**
  * See YapDatabaseExtensionTransaction.m for discussion of these methods
-**/
+ */
 
 - (BOOL)getBoolValue:(BOOL *)valuePtr forExtensionKey:(NSString *)key persistent:(BOOL)inDatabaseOrMemoryTable;
 - (BOOL)boolValueForExtensionKey:(NSString *)key persistent:(BOOL)inDatabaseOrMemoryTable;
